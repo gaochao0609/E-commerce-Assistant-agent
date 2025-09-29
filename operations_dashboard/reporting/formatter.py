@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""提供仪表盘摘要的结构化与文本格式化工具。"""
+
+from __future__ import annotations
 
 from typing import Dict, List
 
@@ -6,8 +8,14 @@ from ..metrics.calculations import DashboardSummary, ProductPerformance
 
 
 def summary_to_dict(summary: DashboardSummary) -> Dict[str, object]:
-    """将仪表盘摘要结构化为 JSON 友好的字典。"""
-
+    """
+    功能说明:
+        将 DashboardSummary 转换为可 JSON 序列化的字典。
+    参数:
+        summary (DashboardSummary): 仪表盘汇总对象。
+    返回:
+        Dict[str, object]: 序列化后的摘要结构。
+    """
     return {
         "source": summary.source_name,
         "window": {
@@ -37,37 +45,45 @@ def summary_to_dict(summary: DashboardSummary) -> Dict[str, object]:
     }
 
 
-def _format_currency(value: float) -> str:
-    """把数值格式化为带千分位的美元字符串。"""
-
-    return "$" + format(value, ",.2f")
-
-
 def _format_product_line(idx: int, product: ProductPerformance) -> str:
-    """渲染单个商品的文本行。"""
-
+    """
+    功能说明:
+        将单个商品表现格式化为人类可读的文本。
+    参数:
+        idx (int): 商品排名序号。
+        product (ProductPerformance): 商品表现数据。
+    返回:
+        str: 格式化后的文本行。
+    """
     buy_box = (
         f"Buy Box {product.buy_box_percentage:.2f}%"
         if product.buy_box_percentage is not None
         else "Buy Box n/a"
     )
+    revenue = "$" + format(product.revenue, ",.2f")
     return (
-        f"{idx}. {product.title} ({product.asin}) - Revenue {_format_currency(product.revenue)}, "
+        f"{idx}. {product.title} ({product.asin}) - Revenue {revenue}, "
         f"Units {product.units}, Sessions {product.sessions}, "
         f"CVR {product.conversion_rate:.2%}, Refunds {product.refunds}, {buy_box}"
     )
 
 
 def format_text_report(summary: DashboardSummary) -> str:
-    """生成可读性良好的文本报告。"""
-
+    """
+    功能说明:
+        生成适合在控制台展示的运营日报文本。
+    参数:
+        summary (DashboardSummary): 仪表盘汇总对象。
+    返回:
+        str: 多行字符串，包含窗口信息与 Top 商品列表。
+    """
     totals = summary.totals
     lines: List[str] = []
     lines.append(
         f"Window: {summary.start.isoformat()} to {summary.end.isoformat()}"
     )
     lines.append(f"Source: {summary.source_name}")
-    revenue = _format_currency(totals.total_revenue)
+    revenue = "$" + format(totals.total_revenue, ",.2f")
     lines.append(
         f"Totals: Revenue {revenue}, Units {totals.total_units}, "
         f"Sessions {totals.total_sessions}, CVR {totals.conversion_rate:.2%}, "

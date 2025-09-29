@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""定义运营仪表盘的数据抓取与指标计算流程。"""
+
+from __future__ import annotations
 
 from datetime import date
 from typing import Optional
@@ -10,15 +12,13 @@ from ..utils.dates import recent_period
 
 
 class DashboardPipeline:
-    """调度数据采集与 KPI 汇总的主流程。"""
+    """
+    协调数据抓取与指标汇总的高层管道。
+
+    构造函数需要注入应用配置与数据源，便于在不同上下文中复用。
+    """
 
     def __init__(self, *, config: AppConfig, data_source: SalesDataSource) -> None:
-        """初始化管道。
-
-        参数:
-            config: 全局配置对象，提供默认窗口、Top N 等参数。
-            data_source: 实际的数据源实现（可为真实或模拟）。
-        """
         self._config = config
         self._data_source = data_source
 
@@ -29,17 +29,18 @@ class DashboardPipeline:
         end: Optional[date] = None,
         top_n: Optional[int] = None,
     ) -> DashboardSummary:
-        """执行一次汇总。
-
+        """
+        功能说明:
+            执行数据抓取与指标汇总，返回仪表盘摘要。
         参数:
-            start: 自定义统计开始日期，未提供则使用配置窗口。
-            end: 自定义统计结束日期。
-            top_n: 覆盖默认的重点商品数量。
-
+            start (Optional[date]): 可选的开始日期。
+            end (Optional[date]): 可选的结束日期。
+            top_n (Optional[int]): 覆盖默认配置的 Top N 数量。
         返回:
-            DashboardSummary，包含整体指标与重点商品列表。
+            DashboardSummary: 汇总后的仪表盘结果。
         """
         if start is None or end is None:
+            # 未显式指定时间窗口时，根据配置自动回退到最近窗口。
             window_days = self._config.dashboard.refresh_window_days
             start, end = recent_period(window_days)
 

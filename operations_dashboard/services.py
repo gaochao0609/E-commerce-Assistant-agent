@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""运营仪表盘服务层，封装数据读取、指标计算以及 MCP 桥接调用的业务逻辑。"""
+
+from __future__ import annotations
 
 import csv
 import logging
@@ -29,11 +31,23 @@ PAAPI_RESOURCES: List[str] = [
     "BrowseNodeInfo.BrowseNodes.Ancestor",
     "BrowseNodeInfo.BrowseNodes.SalesRank",
 ]
+# Amazon PAAPI 搜索请求所需的资源字段，确保返回标题、节点链路与销量排名。
 MAX_ITEMS_PER_REQUEST = 10
+# 控制单次畅销榜请求的最大商品数量，避免违反 PAAPI 速率限制。
 
 
 @dataclass
 class ServiceContext:
+    """
+    汇总运营仪表盘服务所需的共享依赖。
+
+    属性:
+        config (AppConfig): 全局配置，包含市场、存储等信息。
+        data_source (SalesDataSource): 用于拉取销量与流量的具体实现。
+        repository (Optional[SQLiteRepository]): 可选的 SQLite 仓库，用于持久化。
+        llm (Optional[ChatOpenAI]): 可选的语言模型实例，用于生成洞察。
+    """
+
     config: AppConfig
     data_source: SalesDataSource
     repository: Optional[SQLiteRepository] = None
@@ -47,20 +61,45 @@ def create_service_context(
     repository: Optional[SQLiteRepository] = None,
     llm: Optional[ChatOpenAI] = None,
 ) -> ServiceContext:
+    """
+    功能说明:
+        基于应用配置构建服务上下文，自动注入数据源、仓库以及语言模型。
+    参数:
+        config (AppConfig): 应用层配置，包含市场与存储信息。
+        data_source (Optional[SalesDataSource]): 可选的数据源实现，未提供时使用默认 Mock。
+        repository (Optional[SQLiteRepository]): 可选的持久化仓库实例。
+        llm (Optional[ChatOpenAI]): 可选的语言模型实例，用于生成洞察。
+    返回:
+        ServiceContext: 已填充所有依赖的服务上下文。
+    """
+    # 1. 优先使用外部注入的数据源，否则创建默认的本地模拟数据源。
     data_source = data_source or create_default_mock_source(config)
+    # 2. 如配置启用存储而外部未注入仓库，则自动创建 SQLite 仓库。
     if repository is None and config.storage.enabled:
         repository = SQLiteRepository(config.storage.db_path)
+    # 3. 在存在 OPENAI_API_KEY 时懒加载 LLM，便于后续生成洞察。
     if llm is None and os.getenv("OPENAI_API_KEY"):
         llm = ChatOpenAI(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-3.5-turbo", temperature=0)
     return ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
 
 
 def _extract_items(search_result: object) -> Sequence:
+    """
+    功能说明:
+        从 PAAPI 返回结果中提取 items 列表，兼容不同版本的字段命名。
+    参数:
+        search_result (object): Amazon PAAPI 的原始响应对象。
+    返回:
+        Sequence: 抽取出的商品对象序列，若无数据则返回空列表。
+    """
+    # 1. 直接尝试访问 items 属性，不存在时提前返回空列表。
     items_container = getattr(search_result, "items", None)
     if not items_container:
         return []
+    # 2. 若已经是序列类型则直接返回，保持原有顺序。
     if isinstance(items_container, (list, tuple)):
         return items_container
+    # 3. 兼容部分 SDK 使用的 items/item 嵌套字段。
     for attr in ("items", "item"):
         extracted = getattr(items_container, attr, None)
         if extracted:
@@ -69,6 +108,15 @@ def _extract_items(search_result: object) -> Sequence:
 
 
 def _extract_primary_node(item: object) -> Tuple[Optional[str], Optional[int]]:
+    """
+    功能说明:
+        从商品对象中提取首个浏览节点名称及对应的销售排名。
+    参数:
+        item (object): Amazon PAAPI 商品对象。
+    返回:
+        Tuple[Optional[str], Optional[int]]: 节点显示名与 sales rank，若缺失则返回 None。
+    """
+    # 1. 获取浏览节点列表，兼容不同字段命名。
     browse_info = getattr(item, "browse_node_info", None)
     nodes = getattr(browse_info, "browse_nodes", None)
     if not nodes:
@@ -85,6 +133,14 @@ def _extract_primary_node(item: object) -> Tuple[Optional[str], Optional[int]]:
 
 
 def _extract_title(item: object) -> str:
+    """
+    功能说明:
+        获取商品的展示标题，若缺失则回退到 ASIN 或占位文本。
+    参数:
+        item (object): Amazon PAAPI 商品对象。
+    返回:
+        str: 商品标题或退化后的 ASIN/占位名称。
+    """
     item_info = getattr(item, "item_info", None)
     title_info = getattr(item_info, "title", None) if item_info else None
     title = getattr(title_info, "display_value", None) if title_info else None
@@ -92,6 +148,15 @@ def _extract_title(item: object) -> str:
 
 
 def records_to_payload(records: List[SalesRecord]) -> List[Dict[str, Any]]:
+    """
+    功能说明:
+        将 SalesRecord 列表转换为 JSON 友好的字典结构。
+    参数:
+        records (List[SalesRecord]): 销售记录列表。
+    返回:
+        List[Dict[str, Any]]: 适合跨进程传输或序列化的字典数组。
+    """
+    # 将数据逐条展开为基础类型字段，避免 datetime 等复杂对象。
     return [
         {
             "day": record.day.isoformat(),
@@ -108,6 +173,14 @@ def records_to_payload(records: List[SalesRecord]) -> List[Dict[str, Any]]:
 
 
 def traffic_to_payload(records: List[TrafficRecord]) -> List[Dict[str, Any]]:
+    """
+    功能说明:
+        将 TrafficRecord 列表转换为便于下游消费的字典结构。
+    参数:
+        records (List[TrafficRecord]): 流量记录列表。
+    返回:
+        List[Dict[str, Any]]: 包含流量指标的字典数组。
+    """
     return [
         {
             "day": record.day.isoformat(),
@@ -121,6 +194,14 @@ def traffic_to_payload(records: List[TrafficRecord]) -> List[Dict[str, Any]]:
 
 
 def payload_to_sales(payload: List[Dict[str, Any]]) -> List[SalesRecord]:
+    """
+    功能说明:
+        将字典形式的销售数据还原为 SalesRecord 对象，便于内部计算。
+    参数:
+        payload (List[Dict[str, Any]]): 序列化后的销售数据集合。
+    返回:
+        List[SalesRecord]: 结构化的销售记录列表。
+    """
     return [
         SalesRecord(
             day=date.fromisoformat(item["day"]),
@@ -128,15 +209,23 @@ def payload_to_sales(payload: List[Dict[str, Any]]) -> List[SalesRecord]:
             title=str(item.get("title", "")),
             units_ordered=int(item["units_ordered"]),
             ordered_revenue=float(item["ordered_revenue"]),
-            sessions=int(item.get("sessions", 0)),
-            conversions=float(item.get("conversions", 0.0)),
-            refunds=int(item.get("refunds", 0)),
+            sessions=int(item["sessions"]),
+            conversions=float(item["conversions"]),
+            refunds=int(item["refunds"]),
         )
         for item in payload
     ]
 
 
 def payload_to_traffic(payload: List[Dict[str, Any]]) -> List[TrafficRecord]:
+    """
+    功能说明:
+        将字典形式的流量数据还原为 TrafficRecord 对象。
+    参数:
+        payload (List[Dict[str, Any]]): 序列化后的流量数据集合。
+    返回:
+        List[TrafficRecord]: 结构化的流量记录列表。
+    """
     return [
         TrafficRecord(
             day=date.fromisoformat(item["day"]),
@@ -150,12 +239,30 @@ def payload_to_traffic(payload: List[Dict[str, Any]]) -> List[TrafficRecord]:
 
 
 def calc_growth(current: float, base: Optional[float]) -> Optional[float]:
+    """
+    功能说明:
+        计算同比或环比的增长率，基准为 0 或缺失时返回 None。
+    参数:
+        current (float): 当前值。
+        base (Optional[float]): 对比基准值，可为空。
+    返回:
+        Optional[float]: 增长率，使用小数表示。
+    """
     if base is None or base == 0:
         return None
     return (current - base) / base
 
 
 def find_yoy(repository: SQLiteRepository, current_start: date) -> Optional[StoredSummary]:
+    """
+    功能说明:
+        查找与当前窗口开始日期对应的去年同期汇总数据。
+    参数:
+        repository (SQLiteRepository): 数据仓库实例。
+        current_start (date): 当前窗口的起始日期。
+    返回:
+        Optional[StoredSummary]: 匹配到的历史汇总，否则为 None。
+    """
     try:
         target = current_start.replace(year=current_start.year - 1)
     except ValueError:
@@ -171,12 +278,27 @@ def fetch_dashboard_data(
     window_days: Optional[int] = None,
     top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        在指定时间窗口内拉取原始销量与流量数据。
+    参数:
+        context (ServiceContext): 包含数据源与配置的上下文。
+        start (Optional[str]): 起始日期，ISO 格式。
+        end (Optional[str]): 结束日期，ISO 格式。
+        window_days (Optional[int]): 未指定时间范围时的滚动窗口天数。
+        top_n (Optional[int]): 需要关注的 Top N 商品数量。
+    返回:
+        Dict[str, Any]: 包含窗口信息、数据源名称以及原始数据的字典。
+    """
+    # 1. 解析用户输入的日期字符串；若缺失则稍后根据配置计算窗口。
     parsed_start = date.fromisoformat(start) if start else None
     parsed_end = date.fromisoformat(end) if end else None
     if parsed_start is None or parsed_end is None:
+        # 2. 当任意一端缺失时，按照配置的窗口天数自动回填。
         window = window_days or context.config.dashboard.refresh_window_days
         parsed_start, parsed_end = recent_period(window)
 
+    # 3. 调用数据源获取销量与流量原始记录。
     sales_records = context.data_source.fetch_sales(parsed_start, parsed_end)
     traffic_records = context.data_source.fetch_traffic(parsed_start, parsed_end)
     return {
@@ -199,6 +321,21 @@ def compute_dashboard_metrics(
     traffic: List[Dict[str, Any]],
     top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        汇总销量与流量数据，生成 KPI 摘要并按需持久化。
+    参数:
+        context (ServiceContext): 服务上下文，提供配置与仓库。
+        start (str): 窗口开始日期。
+        end (str): 窗口结束日期。
+        source (str): 数据来源标识。
+        sales (List[Dict[str, Any]]): 序列化的销售记录。
+        traffic (List[Dict[str, Any]]): 序列化的流量记录。
+        top_n (Optional[int]): 覆盖默认配置的 Top N 数量。
+    返回:
+        Dict[str, Any]: 包含结构化摘要的字典。
+    """
+    # 1. 将序列化数据还原为记录对象并构建汇总摘要。
     summary = build_dashboard_summary(
         source_name=source,
         start=date.fromisoformat(start),
@@ -207,6 +344,7 @@ def compute_dashboard_metrics(
         traffic_records=payload_to_traffic(traffic),
         top_n=top_n or context.config.dashboard.top_n_products,
     )
+    # 2. 若仓库可用则落盘保存，便于后续历史分析。
     if context.repository and context.config.storage.enabled:
         context.repository.initialize()
         context.repository.save_summary(summary)
@@ -219,18 +357,30 @@ def generate_dashboard_insights(
     summary: Dict[str, Any],
     focus: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        调用配置好的 LLM 依据 KPI 摘要生成结构化洞察。
+    参数:
+        context (ServiceContext): 服务上下文，需包含 LLM。
+        summary (Dict[str, Any]): 聚合后的 KPI 摘要。
+        focus (Optional[str]): 需要额外关注的主题维度。
+    返回:
+        Dict[str, Any]: 包含原始摘要与洞察文本的字典。
+    """
     if context.llm is None:
         raise RuntimeError("OPENAI_API_KEY 未配置，无法生成洞察。")
+    # 1. 构造系统指令，约束输出格式与分析重点。
     instructions = (
-        "你是一名亚马逊运营分析师，请基于给定的指标生成结构化洞察。"
-        "按照“总体表现”“亮点商品”“风险/建议”三个部分输出。"
+        "请以资深运营顾问身份，依据提供的数据生成结构化洞察。"
+        "优先关注“销量趋势、流量变化、转化率、退款”这些主题。"
     )
     if focus:
-        instructions += f" 优先关注：{focus}。"
+        instructions += f" 特别关注 {focus}。"
+    # 2. 以 JSON 摘要作为人类消息传入模型，获取分析结果。
     response = context.llm.invoke(
         [
             SystemMessage(content=instructions),
-            HumanMessage(content=f"请分析以下 JSON 数据：{summary}"),
+            HumanMessage(content=f"以下是最新的 JSON 数据：{summary}"),
         ]
     )
     return {"report": {"summary": summary, "insights": response.content}}
@@ -242,9 +392,19 @@ def analyze_dashboard_history(
     limit: int = 6,
     metrics: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        计算指定指标的环比、同比增长率，并生成时间序列数据。
+    参数:
+        context (ServiceContext): 服务上下文，需提供仓库访问能力。
+        limit (int): 需要纳入分析的历史期数，默认最近 6 期。
+        metrics (Optional[List[str]]): 需要分析的指标列表，None 表示默认指标。
+    返回:
+        Dict[str, Any]: 包含增长分析与时间序列的结构化结果。
+    """
     if not context.repository:
         return {
-            "analysis": {"error": "未启用数据库持久化，无法读取历史数据。"},
+            "analysis": {"error": "未启用数据库持久化，无法获取历史数据。"},
             "time_series": {},
         }
     context.repository.initialize()
@@ -259,6 +419,7 @@ def analyze_dashboard_history(
     yoy_summary = find_yoy(context.repository, date.fromisoformat(current.start))
     metrics = metrics or ["revenue", "units", "sessions"]
     analysis: Dict[str, Dict[str, Optional[float]]] = {}
+    # 1. 针对每个指标计算当前值、环比与同比增长。
     for metric in metrics:
         attr = f"total_{metric}"
         if not hasattr(current, attr):
@@ -271,6 +432,7 @@ def analyze_dashboard_history(
             "mom": calc_growth(current_value, prev_value),
             "yoy": calc_growth(current_value, yoy_value),
         }
+    # 2. 构建时间序列，便于在前端绘制趋势曲线。
     series = {
         metric: [
             {
@@ -291,6 +453,16 @@ def export_dashboard_history(
     limit: int,
     path: str,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        导出指定数量的历史汇总记录到 CSV 文件。
+    参数:
+        context (ServiceContext): 服务上下文，需包含仓库实例。
+        limit (int): 导出的记录数量。
+        path (str): CSV 输出路径，可为相对路径。
+    返回:
+        Dict[str, Any]: 包含导出结果描述的字典。
+    """
     if not context.repository:
         return {"message": "未启用数据库持久化，无法导出历史数据。"}
     context.repository.initialize()
@@ -299,6 +471,7 @@ def export_dashboard_history(
         return {"message": "数据库暂无可导出的历史记录。"}
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # 写入 CSV 表头及逐条记录，采用 UTF-8 以兼容中文。
     with output_path.open("w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(
@@ -339,7 +512,20 @@ def amazon_bestseller_search(
     browse_node_id: Optional[str] = None,
     max_items: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    功能说明:
+        调用 Amazon PAAPI 获取指定类目的畅销商品列表。
+    参数:
+        context (ServiceContext): 服务上下文，需提供 Amazon 凭证。
+        category (str): 业务侧的类目描述。
+        search_index (str): PAAPI 搜索索引，例如 "Books"。
+        browse_node_id (Optional[str]): 指定的浏览节点 ID。
+        max_items (Optional[int]): 返回的最大商品数量。
+    返回:
+        Dict[str, Any]: 包含畅销商品列表的字典。
+    """
     amazon_conf = context.config.amazon
+    # 1. 基础凭证缺失时拒绝请求，避免调用失败消耗额度。
     if amazon_conf.access_key in {"", "mock"} or amazon_conf.secret_key in {"", "mock"}:
         raise RuntimeError("Amazon PAAPI 凭证未配置，无法获取畅销榜数据。")
     client = AmazonApi(
@@ -355,6 +541,7 @@ def amazon_bestseller_search(
         "item_count": request_count,
         "resources": PAAPI_RESOURCES,
     }
+    # 2. 有明确节点时使用 browse_node_id，否则退回到关键字搜索。
     if browse_node_id:
         search_kwargs["browse_node_id"] = browse_node_id
     else:

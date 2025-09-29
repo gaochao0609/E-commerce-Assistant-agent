@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""提供基于 Amazon Business Report 的模拟数据源，方便本地开发与测试。"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -10,21 +12,32 @@ from .base import CredentialProvider, SalesDataSource, SalesRecord, TrafficRecor
 
 @dataclass
 class MockDataSourceSettings:
-    """伪造数据源的控制参数。"""
+    """
+    控制模拟数据源行为的配置项。
+
+    属性:
+        seed (int): 伪随机种子，确保数据可复现。
+        asin_list (List[str] | None): 需要生成的 ASIN 列表，None 表示使用默认样例。
+    """
 
     seed: int = 2024
     asin_list: List[str] | None = None
 
 
 class MockAmazonBusinessReportSource(SalesDataSource):
-    """使用确定性的随机数，模拟 Amazon Business Reports 输出。"""
+    """
+    基于线性同余发生器的可复现模拟数据源。
+
+    通过伪随机算法模拟销量与流量走势，形似 Amazon Business Report 导出内容。
+    """
 
     def __init__(self, credentials: CredentialProvider, settings: MockDataSourceSettings | None = None) -> None:
-        """构造模拟数据源。
-
+        """
+        功能说明:
+            创建模拟数据源实例。
         参数:
-            credentials: Amazon 凭证（占位使用，不参与生成）。
-            settings: 可选的伪造参数设置。
+            credentials (CredentialProvider): Amazon 凭证，用于兼容真实实现接口。
+            settings (Optional[MockDataSourceSettings]): 控制伪随机行为的配置。
         """
         self.name = "mock_amazon_business_report"
         self._credentials = credentials
@@ -36,7 +49,15 @@ class MockAmazonBusinessReportSource(SalesDataSource):
         ]
 
     def fetch_sales(self, start: date, end: date) -> List[SalesRecord]:
-        """生成指定时间区间的模拟销量数据。"""
+        """
+        功能说明:
+            生成指定时间范围内的伪随机销售数据。
+        参数:
+            start (date): 起始日期。
+            end (date): 结束日期。
+        返回:
+            List[SalesRecord]: 销售记录列表。
+        """
         rng = _PseudoRandom(self._settings.seed + 1)
         timeline = list(_iter_days(start, end))
         records: List[SalesRecord] = []
@@ -44,6 +65,7 @@ class MockAmazonBusinessReportSource(SalesDataSource):
             base_units = max(10, rng.randint(20, 80))
             base_revenue = max(400, rng.randint(800, 2000))
             for day in timeline:
+                # 使用基础值叠加随机波动来模拟真实销量。
                 units = max(0, int(base_units * rng.uniform(0.6, 1.3)))
                 revenue = round(base_revenue * rng.uniform(0.6, 1.2), 2)
                 sessions = max(units * rng.randint(4, 9), 1)
@@ -64,7 +86,15 @@ class MockAmazonBusinessReportSource(SalesDataSource):
         return records
 
     def fetch_traffic(self, start: date, end: date) -> List[TrafficRecord]:
-        """生成指定时间区间的模拟流量数据。"""
+        """
+        功能说明:
+            生成指定时间范围内的伪随机流量数据。
+        参数:
+            start (date): 起始日期。
+            end (date): 结束日期。
+        返回:
+            List[TrafficRecord]: 流量记录列表。
+        """
         rng = _PseudoRandom(self._settings.seed + 2)
         timeline = list(_iter_days(start, end))
         records: List[TrafficRecord] = []
@@ -87,14 +117,27 @@ class MockAmazonBusinessReportSource(SalesDataSource):
 
 
 def create_default_mock_source(config: AppConfig) -> MockAmazonBusinessReportSource:
-    """基于全局配置构建默认的模拟数据源。"""
-
+    """
+    功能说明:
+        使用应用配置中的凭证构建默认的模拟数据源。
+    参数:
+        config (AppConfig): 应用配置，提供 Amazon 凭证。
+    返回:
+        MockAmazonBusinessReportSource: 预配置的模拟数据源实例。
+    """
     return MockAmazonBusinessReportSource(credentials=config.amazon)
 
 
 def _iter_days(start: date, end: date) -> Iterable[date]:
-    """生成包含起止日期的连续日期序列。"""
-
+    """
+    功能说明:
+        生成起止日期（闭区间）内的所有日期。
+    参数:
+        start (date): 开始日期。
+        end (date): 结束日期。
+    返回:
+        Iterable[date]: 逐日迭代器。
+    """
     current = start
     while current <= end:
         yield current
@@ -102,21 +145,18 @@ def _iter_days(start: date, end: date) -> Iterable[date]:
 
 
 class _PseudoRandom:
-    """轻量随机数生成器，避免外部依赖。"""
+    """简单的线性同余伪随机数发生器，用于生成可复现的数据。"""
 
     def __init__(self, seed: int) -> None:
         self._state = seed % 2147483647 or 42
 
     def _next(self) -> float:
+        # 使用 MINSTD 参数生成均匀分布的随机数。
         self._state = (self._state * 48271) % 2147483647
         return self._state / 2147483647
 
     def uniform(self, low: float, high: float) -> float:
-        """返回 [low, high] 的均匀分布值。"""
-
         return low + (high - low) * self._next()
 
     def randint(self, low: int, high: int) -> int:
-        """返回 [low, high) 的整数随机值。"""
-
         return int(low + (high - low) * self._next())

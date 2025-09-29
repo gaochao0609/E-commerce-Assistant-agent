@@ -1,4 +1,4 @@
-﻿"""运行数据总览演示 CLI，支持持久化与历史查询。"""
+﻿"""运营仪表盘演示的命令行入口，串联数据拉取与报告生成。"""
 
 import argparse
 import json
@@ -6,24 +6,23 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import (
-    AmazonCredentialConfig,
-    AppConfig,
-    DashboardConfig,
-    StorageConfig,
-)
+from .config import AmazonCredentialConfig, AppConfig, DashboardConfig, StorageConfig
 from .data_sources.amazon_business_reports import create_default_mock_source
 from .pipeline.pipeline import DashboardPipeline
 from .reporting.formatter import format_text_report, summary_to_dict
 from .storage.repository import SQLiteRepository
 
-
 DATE_FMT = "%Y-%m-%d"
+# CLI 中所有日期相关参数均采用统一的格式化规则，便于提示与校验。
 
 
 def parse_args() -> argparse.Namespace:
-    """解析命令行参数并返回命名空间。"""
-
+    """
+    功能说明:
+        构建并解析命令行参数，返回解析后的命名空间。
+    返回:
+        argparse.Namespace: 包含用户指定的运行选项。
+    """
     parser = argparse.ArgumentParser(description="Operations dashboard demo runner")
     parser.add_argument(
         "--mode",
@@ -44,8 +43,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_mock_config(args: argparse.Namespace) -> AppConfig:
-    """基于命令行参数构建 mock 模式配置。"""
-
+    """
+    功能说明:
+        基于 CLI 解析结果生成一个用于本地演示的 Mock 配置。
+    参数:
+        args (argparse.Namespace): 命令行解析得到的参数集合。
+    返回:
+        AppConfig: 用于后续管道运行的配置对象。
+    """
     amazon = AmazonCredentialConfig(
         access_key="mock",
         secret_key="mock",
@@ -66,16 +71,29 @@ def build_mock_config(args: argparse.Namespace) -> AppConfig:
 
 
 def parse_date(value: Optional[str]) -> Optional[date]:
-    """将用户输入的日期字符串解析为 date 对象。"""
-
+    """
+    功能说明:
+        将 `YYYY-MM-DD` 字符串解析为 `date` 对象。
+    参数:
+        value (Optional[str]): 用户输入的日期字符串，可为空。
+    返回:
+        Optional[date]: 成功解析后的日期；若为空则返回 `None`。
+    """
     if not value:
         return None
     return datetime.strptime(value, DATE_FMT).date()
 
 
 def persist_summary(config: AppConfig, summary) -> SQLiteRepository:
-    """根据配置持久化汇总数据，并返回仓储实例。"""
-
+    """
+    功能说明:
+        将生成的仪表盘摘要持久化到 SQLite 数据库。
+    参数:
+        config (AppConfig): 提供数据库路径及启用信息。
+        summary: 打包后的仪表盘汇总对象。
+    返回:
+        SQLiteRepository: 已初始化且写入完成的仓库实例。
+    """
     repo = SQLiteRepository(config.storage.db_path)
     repo.initialize()
     summary_id = repo.save_summary(summary)
@@ -84,8 +102,10 @@ def persist_summary(config: AppConfig, summary) -> SQLiteRepository:
 
 
 def run_cli() -> None:
-    """主执行函数：调度数据源、管道与输出。"""
-
+    """
+    功能说明:
+        命令行主入口：读取参数、执行管道、输出报告并根据需要持久化。
+    """
     args = parse_args()
     if args.mode == "live":
         raise NotImplementedError(
@@ -104,6 +124,7 @@ def run_cli() -> None:
     print(report_text)
 
     if args.output_json:
+        # 将汇总转为 JSON 并写入文件，encode 为 UTF-8 以保留中文字符。
         payload = summary_to_dict(summary)
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
         args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

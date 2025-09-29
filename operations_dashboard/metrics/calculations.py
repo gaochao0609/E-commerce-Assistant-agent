@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""提供仪表盘 KPI 汇总及 Top 商品排名的计算逻辑。"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
@@ -9,7 +11,16 @@ from ..data_sources.base import SalesRecord, TrafficRecord
 
 @dataclass
 class KPIOverview:
-    """整体关键指标概览。"""
+    """
+    描述一个时间窗口内的顶层 KPI 指标。
+
+    属性:
+        total_revenue (float): 总销售额。
+        total_units (int): 总销量。
+        total_sessions (int): 总会话数。
+        conversion_rate (float): 综合转化率。
+        refund_rate (float): 退款率。
+    """
 
     total_revenue: float
     total_units: int
@@ -20,7 +31,19 @@ class KPIOverview:
 
 @dataclass
 class ProductPerformance:
-    """单个 ASIN 的业绩快照。"""
+    """
+    记录单个 ASIN 的核心表现指标。
+
+    属性:
+        asin (str): 商品 ASIN。
+        title (str): 商品标题。
+        revenue (float): 销售额。
+        units (int): 销量。
+        sessions (int): 会话数。
+        conversion_rate (float): 转化率。
+        refunds (int): 退款数量。
+        buy_box_percentage (float | None): 购物车占有率。
+    """
 
     asin: str
     title: str
@@ -34,7 +57,16 @@ class ProductPerformance:
 
 @dataclass
 class DashboardSummary:
-    """组合整体数据与重点商品的报表结构。"""
+    """
+    封装仪表盘汇总结果，供前端或导出使用。
+
+    属性:
+        start (date): 窗口开始日期。
+        end (date): 窗口结束日期。
+        source_name (str): 数据来源名称。
+        totals (KPIOverview): 顶层 KPI 概览。
+        top_products (List[ProductPerformance]): Top 商品表现列表。
+    """
 
     start: date
     end: date
@@ -52,8 +84,19 @@ def build_dashboard_summary(
     traffic_records: List[TrafficRecord],
     top_n: int = 10,
 ) -> DashboardSummary:
-    """汇总销量、流量数据并产出仪表盘摘要。"""
-
+    """
+    功能说明:
+        汇总销量与流量记录，生成仪表盘需要的 KPI 与 Top 商品列表。
+    参数:
+        source_name (str): 数据来源名称。
+        start (date): 窗口开始日期。
+        end (date): 窗口结束日期。
+        sales_records (List[SalesRecord]): 销售记录。
+        traffic_records (List[TrafficRecord]): 流量记录。
+        top_n (int): 需要保留的 Top 商品数量。
+    返回:
+        DashboardSummary: 汇总后的仪表盘摘要。
+    """
     aggregated = _aggregate_by_asin(sales_records, traffic_records)
 
     total_revenue = sum(item["revenue"] for item in aggregated.values())
@@ -102,8 +145,15 @@ def _aggregate_by_asin(
     sales_records: List[SalesRecord],
     traffic_records: List[TrafficRecord],
 ) -> Dict[str, Dict[str, float | int | None]]:
-    """按 ASIN 聚合销量与流量数据。"""
-
+    """
+    功能说明:
+        将销量与流量数据按 ASIN 聚合。
+    参数:
+        sales_records (List[SalesRecord]): 销售记录列表。
+        traffic_records (List[TrafficRecord]): 流量记录列表。
+    返回:
+        Dict[str, Dict[str, float | int | None]]: 每个 ASIN 对应的聚合指标字典。
+    """
     aggregated: Dict[str, Dict[str, float | int | None]] = {}
 
     for record in sales_records:

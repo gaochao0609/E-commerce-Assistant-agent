@@ -1,17 +1,31 @@
-﻿from __future__ import annotations
+﻿"""使用 SQLite 持久化仪表盘摘要及商品表现数据。"""
+
+from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..metrics.calculations import DashboardSummary, ProductPerformance
 
 
 @dataclass
 class StoredProduct:
-    """数据库中记录的重点商品信息。"""
+    """
+    表示存储在 products 表中的一行数据。
+
+    属性:
+        asin (str): 商品 ASIN。
+        title (str): 商品标题。
+        revenue (float): 销售额。
+        units (int): 销量。
+        sessions (int): 会话数。
+        conversion_rate (float): 转化率。
+        refunds (int): 退款数量。
+        buy_box_percentage (Optional[float]): 购物车占有率。
+    """
 
     asin: str
     title: str
@@ -25,7 +39,22 @@ class StoredProduct:
 
 @dataclass
 class StoredSummary:
-    """数据库中保存的汇总摘要。"""
+    """
+    表示存储在 summaries 表中的聚合摘要。
+
+    属性:
+        id (int): 主键 ID。
+        start (str): 窗口开始日期（ISO 字符串）。
+        end (str): 窗口结束日期。
+        source (str): 数据来源名称。
+        total_revenue (float): 总销售额。
+        total_units (int): 总销量。
+        total_sessions (int): 总会话数。
+        conversion_rate (float): 综合转化率。
+        refund_rate (float): 退款率。
+        created_at (str): 创建时间。
+        products (List[StoredProduct]): 关联的 Top 商品列表。
+    """
 
     id: int
     start: str
@@ -41,14 +70,20 @@ class StoredSummary:
 
 
 class SQLiteRepository:
-    """基于 SQLite 的持久化仓储。"""
+    """
+    为仪表盘摘要提供基于 SQLite 的持久化能力。
+
+    负责初始化表结构、写入摘要与商品记录，以及读取历史数据。
+    """
 
     def __init__(self, db_path: Path | str) -> None:
         self._db_path = Path(db_path)
 
     def initialize(self) -> None:
-        """初始化数据库文件及表结构。"""
-
+        """
+        功能说明:
+            确保数据库文件及表结构存在。
+        """
         if not self._db_path.parent.exists():
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -87,8 +122,14 @@ class SQLiteRepository:
             )
 
     def save_summary(self, summary: DashboardSummary) -> int:
-        """将 DashboardSummary 写入数据库并返回生成的主键。"""
-
+        """
+        功能说明:
+            将 DashboardSummary 持久化至数据库。
+        参数:
+            summary (DashboardSummary): 仪表盘摘要。
+        返回:
+            int: 新插入摘要的主键 ID。
+        """
         created_at = datetime.utcnow().isoformat(timespec="seconds")
         with sqlite3.connect(self._db_path) as conn:
             conn.execute("PRAGMA foreign_keys = ON;")
@@ -140,8 +181,14 @@ class SQLiteRepository:
         return summary_id
 
     def fetch_recent_summaries(self, limit: int = 10) -> List[StoredSummary]:
-        """按时间逆序返回最近的汇总记录。"""
-
+        """
+        功能说明:
+            按时间倒序获取最近的摘要记录。
+        参数:
+            limit (int): 需要返回的记录数量。
+        返回:
+            List[StoredSummary]: 最近的摘要列表。
+        """
         with sqlite3.connect(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = list(
@@ -175,8 +222,14 @@ class SQLiteRepository:
             return summaries
 
     def fetch_by_start_date(self, start: str) -> Optional[StoredSummary]:
-        """根据起始日期查找单条摘要，用于同比等场景。"""
-
+        """
+        功能说明:
+            按窗口开始日期查询对应的摘要，常用于同比对比。
+        参数:
+            start (str): 起始日期，ISO 字符串。
+        返回:
+            Optional[StoredSummary]: 匹配到的摘要或 None。
+        """
         with sqlite3.connect(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -206,8 +259,15 @@ class SQLiteRepository:
             )
 
     def _fetch_products(self, conn: sqlite3.Connection, summary_id: int) -> List[StoredProduct]:
-        """获取指定汇总的重点商品列表。"""
-
+        """
+        功能说明:
+            查询某摘要 ID 对应的商品行。
+        参数:
+            conn (sqlite3.Connection): 已开启的数据库连接。
+            summary_id (int): 摘要主键 ID。
+        返回:
+            List[StoredProduct]: 商品记录列表。
+        """
         product_rows = conn.execute(
             """
             SELECT asin, title, revenue, units, sessions,
@@ -218,7 +278,4 @@ class SQLiteRepository:
             """,
             (summary_id,),
         )
-        return [
-            StoredProduct(*row)
-            for row in product_rows
-        ]
+        return [StoredProduct(*row) for row in product_rows]
