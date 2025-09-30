@@ -2,8 +2,11 @@
 import asyncio
 import os
 
-from mcp import ClientSession
-from mcp.client.http import connect_streamable_http
+try:
+    from mcp import ClientSession
+    from mcp.client.http import connect_streamable_http
+except ImportError as exc:
+    raise RuntimeError("未找到 mcp 客户端，请先执行 pip install -r requirements.txt") from exc
 
 # Ensure the agent routes tool calls through the MCP bridge before importing it.
 os.environ["USE_MCP_BRIDGE"] = "1"
