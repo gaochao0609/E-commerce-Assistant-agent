@@ -1,37 +1,154 @@
-﻿"""轻量级 HTTP 桥梁，用于代理 MCP 工具调用。"""
+﻿"""MCP 桥接模块，使用官方 Python SDK 通过 stdio 方式与服务器交互。"""
 
-from typing import Any, Dict
+from __future__ import annotations
 
-import requests
+import asyncio
+import json
+import os
+from typing import Any, Dict, Optional
 
-MCP_SERVER_URL = "http://127.0.0.1:8000/mcp"
-# 默认 MCP FastAPI 服务端点地址，必要时可通过环境变量或配置重写。
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.types import EmbeddedResource, TextContent
+
+# 默认用于启动 MCP 服务器的可执行命令，可通过环境变量覆盖。
+DEFAULT_COMMAND = os.getenv("MCP_BRIDGE_COMMAND", "python")
+# 以 JSON 数组形式存储的命令行参数，默认执行 `python -m operations_dashboard.mcp_server`。
+DEFAULT_ARGS = os.getenv(
+    "MCP_BRIDGE_ARGS",
+    json.dumps(["-m", "operations_dashboard.mcp_server"]),
+)
+# 可选的环境变量补丁，允许调用方为子进程注入额外配置。
+DEFAULT_ENV = os.getenv("MCP_BRIDGE_ENV")
+
+
+def _parse_args(raw: str) -> list[str]:
+    """将字符串形式的命令行参数解析为列表。
+
+    参数:
+        raw (str): 以 JSON 数组或空格分隔方式提供的参数字符串。
+
+    返回:
+        list[str]: 解析后的参数列表，保证所有元素均为字符串。
+    """
+
+    try:
+        value = json.loads(raw)
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return value
+    except json.JSONDecodeError:
+        pass
+    return [item for item in raw.split(" ") if item]
+
+
+def _parse_env(raw: Optional[str]) -> Optional[Dict[str, str]]:
+    """解析子进程需要的环境变量补丁。
+
+    参数:
+        raw (Optional[str]): 使用 JSON 对象表示的环境变量字典，或为空。
+
+    返回:
+        Optional[Dict[str, str]]: 若输入合法返回键值均为字符串的字典，否则返回 ``None``。
+    """
+
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+        if isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+            return value
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def _server_parameters() -> StdioServerParameters:
+    """构建 stdio 传输所需的服务器启动参数对象。
+
+    返回:
+        StdioServerParameters: 描述可执行文件、参数、环境变量的配置实例。
+    """
+
+    command = DEFAULT_COMMAND
+    args = _parse_args(DEFAULT_ARGS)
+    env = _parse_env(DEFAULT_ENV)
+    return StdioServerParameters(command=command, args=args, env=env)
+
+
+async def _call_tool_async(tool_name: str, arguments: Dict[str, Any]) -> Any:
+    """异步调用 MCP 工具，优先返回结构化结果。
+
+    参数:
+        tool_name (str): 需要触发的工具名称，需与服务器注册项一致。
+        arguments (Dict[str, Any]): 传递给工具的参数字典，必须可被 JSON 序列化。
+
+    返回:
+        Any: 结构化结果、文本结果或资源文本内容。
+
+    异常:
+        RuntimeError: 当工具调用失败或服务器返回错误状态时抛出。
+    """
+
+    params = _server_parameters()
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments=arguments)
+
+            if getattr(result, "isError", False):
+                messages = []
+                for block in result.content:
+                    if isinstance(block, TextContent):
+                        messages.append(block.text)
+                raise RuntimeError(
+                    f"MCP tool '{tool_name}' failed: {'; '.join(messages) if messages else 'unknown error'}"
+                )
+
+            if result.structuredContent is not None:
+                return result.structuredContent
+
+            for block in result.content:
+                if isinstance(block, TextContent):
+                    return block.text
+                if isinstance(block, EmbeddedResource):
+                    resource = block.resource
+                    text = getattr(resource, "text", None)
+                    if text is not None:
+                        return text
+            return None
+
 
 def call_mcp_tool(tool_name: str, args: Dict[str, Any]) -> Any:
-    """
-    功能说明:
-        通过 HTTP POST 调用 MCP 服务器上的指定工具，并将返回结果转换为原始数据。
+    """同步接口，封装异步 MCP 工具调用流程。
+
     参数:
-        tool_name (str): 需要调用的 MCP 工具名称。
-        args (Dict[str, Any]): 传递给 MCP 工具的 JSON 参数集合。
+        tool_name (str): MCP 工具名称。
+        args (Dict[str, Any]): 传入工具的参数字典。
+
     返回:
-        Any: 工具返回的原始输出数据。
+        Any: 工具返回的结构化或文本结果，若无内容则返回 ``None``。
+
     异常:
-        RuntimeError: 当 MCP 返回不包含成功结果或标识失败时抛出。
+        RuntimeError: 无法启动服务器进程、工具执行失败或发生其他异常。
     """
-    # 1. 构造 MCP 规范要求的一次 batch 调用负载。
-    payload = {"calls": [{"tool_name": tool_name, "args": args}]}
-    # 2. 将请求发送至 FastAPI 端点，并设置 10 秒超时避免长时间阻塞。
-    response = requests.post(MCP_SERVER_URL, json=payload, timeout=10)
-    response.raise_for_status()
-    # 3. 解析返回体结构并校验基础结果是否存在。
-    mcp_response = response.json()
-    if not mcp_response.get("returns"):
-        raise RuntimeError("MCP 响应中不包含任何工具返回内容")
-    tool_return = mcp_response["returns"][0]
-    if tool_return.get("status") != "success":
-        raise RuntimeError(
-            f"工具 '{tool_name}' 调用失败: {tool_return.get('output')}"
-        )
-    # 4. 返回正常工具响应中的主要数据字段。
-    return tool_return.get("output")
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    else:
+        loop = asyncio.new_event_loop()
+
+    try:
+        if loop is None:
+            return asyncio.run(_call_tool_async(tool_name, args))
+        return loop.run_until_complete(_call_tool_async(tool_name, args))
+    except FileNotFoundError as exc:  # pragma: no cover - surface configuration issues clearly
+        raise RuntimeError(f"Unable to start MCP server process: {exc}") from exc
+    except RuntimeError as exc:
+        raise
+    except Exception as exc:  # pragma: no cover - generic guard for unexpected errors
+        raise RuntimeError(f"MCP tool '{tool_name}' invocation failed: {exc}") from exc
+    finally:
+        if loop is not None:
+            loop.close()

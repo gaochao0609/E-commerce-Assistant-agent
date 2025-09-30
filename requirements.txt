@@ -1,8 +1,5 @@
 ﻿langchain
 langchain-openai
 langgraph
-fastapi
-pydantic
-uvicorn
-requests
+mcp[cli]
 python-amazon-paapi

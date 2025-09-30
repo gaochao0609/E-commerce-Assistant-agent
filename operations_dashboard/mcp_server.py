@@ -1,185 +1,405 @@
-﻿"""面向 MCP 客户端的 FastAPI 服务，统一封装运营仪表盘工具。"""
+﻿"""Operations Dashboard MCP 服务器，基于 FastMCP SDK 暴露运营工具与资源。"""
 
-from typing import Any, Callable, Dict, List, Literal
+from __future__ import annotations
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+import argparse
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
-from operations_dashboard.config import AppConfig, AmazonCredentialConfig, DashboardConfig, StorageConfig
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.session import ServerSession
+
+from operations_dashboard.config import (
+    AppConfig,
+    AmazonCredentialConfig,
+    DashboardConfig,
+    StorageConfig,
+)
 from operations_dashboard.services import (
     ServiceContext,
-    analyze_dashboard_history,
-    amazon_bestseller_search,
-    compute_dashboard_metrics,
+    analyze_dashboard_history as _analyze_dashboard_history,
+    amazon_bestseller_search as _amazon_bestseller_search,
+    compute_dashboard_metrics as _compute_dashboard_metrics,
     create_service_context,
-    export_dashboard_history,
-    fetch_dashboard_data,
-    generate_dashboard_insights,
+    export_dashboard_history as _export_dashboard_history,
+    fetch_dashboard_data as _fetch_dashboard_data,
+    generate_dashboard_insights as _generate_dashboard_insights,
 )
+from operations_dashboard.storage.repository import StoredSummary
 
 
-class ToolCall(BaseModel):
-    """
-    表示一次由 MCP 客户端发起的工具调用。
-
-    属性:
-        tool_name (str): 目标工具名称，应当与注册表中的键一致。
-        args (Dict[str, Any]): 发送给工具的参数字典，默认为空。
-    """
-
-    tool_name: str
-    args: Dict[str, Any] = Field(default_factory=dict)
-
-
-class MCPRequest(BaseModel):
-    """
-    MCP 端点接收的请求载荷结构，允许批量调用多个工具。
+@dataclass
+class DashboardAppContext:
+    """封装 MCP 生命周期中共享的服务上下文。
 
     属性:
-        calls (List[ToolCall]): 请求队列，按顺序依次处理。
+        service_context (ServiceContext): 预先构建好的服务上下文，包含数据源、存储与 LLM。
     """
 
-    calls: List[ToolCall]
-
-
-class ToolReturn(BaseModel):
-    """
-    MCP 服务器为每次工具调用返回的规范化结果。
-
-    属性:
-        tool_name (str): 对应的工具名称，便于客户端匹配。
-        status (Literal["success", "failed"]): 标识调用是否成功。
-        output (Any): 工具返回的原始结果或错误信息。
-    """
-
-    tool_name: str
-    status: Literal["success", "failed"]
-    output: Any
-
-
-class MCPResponse(BaseModel):
-    """
-    MCP 端点最终返回的顶层包装结构。
-
-    属性:
-        returns (List[ToolReturn]): 每个工具调用的处理结果列表。
-    """
-
-    returns: List[ToolReturn]
+    service_context: ServiceContext
 
 
 def _load_config() -> AppConfig:
-    """
-    功能说明:
-        优先尝试从环境变量加载应用配置；若缺失则使用默认的 Mock 凭证。
+    """加载应用配置，缺省时退回到安全的 Mock 配置。
+
     返回:
-        AppConfig: 供服务初始化使用的完整配置实例。
+        AppConfig: 含 Amazon 凭证、仪表盘默认参数及存储配置的完整对象。
     """
+
     try:
         return AppConfig.from_env()
     except RuntimeError:
-        # 回退到安全的默认值，便于本地演示与单元测试。
         return AppConfig(
-            amazon=AmazonCredentialConfig(access_key="mock", secret_key="mock", associate_tag=None, marketplace="US"),
+            amazon=AmazonCredentialConfig(
+                access_key="mock",
+                secret_key="mock",
+                associate_tag=None,
+                marketplace="US",
+            ),
             dashboard=DashboardConfig(),
             storage=StorageConfig(),
         )
 
 
-CONFIG = _load_config()
-# 共享的服务上下文，避免每次请求重复构建依赖。
-CONTEXT: ServiceContext = create_service_context(CONFIG)
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[DashboardAppContext]:
+    """在服务器生命周期内创建并共享 ServiceContext。
 
-
-def _fetch_dashboard_data_proxy(**kwargs):
-    """代理函数：复用全局上下文调用 `fetch_dashboard_data`。"""
-
-    return fetch_dashboard_data(CONTEXT, **kwargs)
-
-
-def _compute_dashboard_metrics_proxy(**kwargs):
-    """代理函数：调用 `compute_dashboard_metrics` 计算 KPI。"""
-
-    return compute_dashboard_metrics(CONTEXT, **kwargs)
-
-
-def _generate_dashboard_insights_proxy(**kwargs):
-    """代理函数：生成结构化洞察描述。"""
-
-    return generate_dashboard_insights(CONTEXT, **kwargs)
-
-
-def _analyze_dashboard_history_proxy(**kwargs):
-    """代理函数：执行历史趋势分析。"""
-
-    return analyze_dashboard_history(CONTEXT, **kwargs)
-
-
-def _export_dashboard_history_proxy(**kwargs):
-    """代理函数：导出历史汇总数据。"""
-
-    return export_dashboard_history(CONTEXT, **kwargs)
-
-
-def _amazon_bestseller_search_proxy(**kwargs):
-    """代理函数：查询亚马逊畅销榜。"""
-
-    return amazon_bestseller_search(CONTEXT, **kwargs)
-
-
-TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
-    "fetch_dashboard_data": _fetch_dashboard_data_proxy,
-    "compute_dashboard_metrics": _compute_dashboard_metrics_proxy,
-    "generate_dashboard_insights": _generate_dashboard_insights_proxy,
-    "analyze_dashboard_history": _analyze_dashboard_history_proxy,
-    "export_dashboard_history": _export_dashboard_history_proxy,
-    "amazon_bestseller_search": _amazon_bestseller_search_proxy,
-}
-# 将所有可调用服务收敛到统一的注册表中，供路由调度使用。
-
-app = FastAPI(title="Operations Dashboard MCP", description="Expose dashboard tools via MCP-style API")
-
-
-@app.post("/mcp", response_model=MCPResponse)
-def handle_mcp_request(request: MCPRequest) -> MCPResponse:
-    """
-    功能说明:
-        逐个调度客户端请求的工具，实现 MCP 风格的批量调用。
     参数:
-        request (MCPRequest): 包含所有工具调用定义的请求体。
-    返回:
-        MCPResponse: 按顺序排列的工具执行结果集合。
+        server (FastMCP): FastMCP 服务器实例（未直接使用，兼容接口签名）。
+
+    生成:
+        DashboardAppContext: 提供给工具与资源访问的共享上下文对象。
     """
-    results: List[ToolReturn] = []
-    for call in request.calls:
-        tool = TOOL_REGISTRY.get(call.tool_name)
-        if not tool:
-            # 工具未注册时返回失败结果，帮助客户端排查配置问题。
-            results.append(
-                ToolReturn(
-                    tool_name=call.tool_name,
-                    status="failed",
-                    output=f"工具 '{call.tool_name}' 未注册",
-                )
-            )
-            continue
-        try:
-            output = tool(**call.args)
-            results.append(ToolReturn(tool_name=call.tool_name, status="success", output=output))
-        except Exception as exc:  # pragma: no cover
-            # 捕获内部错误，防止单个工具导致整个批次失败。
-            results.append(
-                ToolReturn(
-                    tool_name=call.tool_name,
-                    status="failed",
-                    output=str(exc),
-                )
-            )
-    return MCPResponse(returns=results)
+
+    config = _load_config()
+    service_context = create_service_context(config)
+    try:
+        yield DashboardAppContext(service_context=service_context)
+    finally:
+        pass
 
 
-@app.get("/")
-def read_root():
-    """提供健康检查信息，提示客户端访问 /mcp 完成工具调用。"""
+mcp = FastMCP(
+    name="Operations Dashboard",
+    instructions=(
+        "Expose Amazon operations analytics through MCP tools and resources. "
+        "Use the registered tools to fetch raw data, compute KPIs, and analyze trends."
+    ),
+    lifespan=app_lifespan,
+)
 
-    return {"message": "MCP Server 正在运行，请向 /mcp 端点发送请求"}
+
+def _service(ctx: Context[ServerSession, DashboardAppContext]) -> ServiceContext:
+    """从上下文中提取共享的 ServiceContext。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): FastMCP 注入的请求上下文。
+
+    返回:
+        ServiceContext: 当前会话可复用的业务服务上下文。
+    """
+
+    return ctx.app.service_context
+
+
+def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
+    """将 SQLite 中的存储摘要转换为 JSON 友好的结构。
+
+    参数:
+        summary (StoredSummary): 存储层返回的仪表盘摘要对象。
+
+    返回:
+        Dict[str, Any]: 包含基础统计与产品列表的字典结构。
+    """
+
+    return {
+        "id": summary.id,
+        "start": summary.start,
+        "end": summary.end,
+        "source": summary.source,
+        "total_revenue": summary.total_revenue,
+        "total_units": summary.total_units,
+        "total_sessions": summary.total_sessions,
+        "conversion_rate": summary.conversion_rate,
+        "refund_rate": summary.refund_rate,
+        "created_at": summary.created_at,
+        "products": [
+            {
+                "asin": product.asin,
+                "title": product.title,
+                "revenue": product.revenue,
+                "units": product.units,
+                "sessions": product.sessions,
+                "conversion_rate": product.conversion_rate,
+                "refunds": product.refunds,
+                "buy_box_percentage": product.buy_box_percentage,
+            }
+            for product in summary.products
+        ],
+    }
+
+
+@mcp.resource("operations-dashboard://config")
+def read_configuration(ctx: Context[ServerSession, DashboardAppContext]) -> Dict[str, Any]:
+    """暴露运行时使用的仪表盘配置。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): FastMCP 自动注入的上下文对象。
+
+    返回:
+        Dict[str, Any]: 包含市场、窗口长度、TopN 与存储配置的字典。
+    """
+
+    service_context = _service(ctx)
+    config = service_context.config
+    return {
+        "marketplace": config.dashboard.marketplace,
+        "default_window_days": config.dashboard.refresh_window_days,
+        "top_n_products": config.dashboard.top_n_products,
+        "storage_enabled": config.storage.enabled,
+        "database_path": config.storage.db_path,
+    }
+
+
+@mcp.resource("operations-dashboard://history/{limit:int}")
+def read_recent_history(
+    ctx: Context[ServerSession, DashboardAppContext],
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """读取最近的仪表盘摘要历史。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 请求上下文。
+        limit (int): 需要返回的历史记录条数，默认 5。
+
+    返回:
+        Dict[str, Any]: 若启用存储返回摘要列表，否则返回提示信息。
+    """
+
+    service_context = _service(ctx)
+    repository = service_context.repository
+    if not repository:
+        return {"message": "Storage is disabled for this deployment."}
+    repository.initialize()
+    summaries = repository.fetch_recent_summaries(limit=limit)
+    return {"summaries": [_summary_to_dict(summary) for summary in summaries]}
+
+
+@mcp.tool(name="fetch_dashboard_data")
+def tool_fetch_dashboard_data(
+    ctx: Context[ServerSession, DashboardAppContext],
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    window_days: Optional[int] = None,
+    top_n: Optional[int] = None,
+) -> Dict[str, Any]:
+    """获取指定时间窗口的原始销售与流量数据。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 当前工具调用的上下文。
+        start (Optional[str]): ISO 日期字符串，表示起始日期。
+        end (Optional[str]): ISO 日期字符串，表示结束日期。
+        window_days (Optional[int]): 未提供 start/end 时的回溯天数。
+        top_n (Optional[int]): 希望包含的重点商品数量。
+
+    返回:
+        Dict[str, Any]: 包含销售、流量与商品清单的原始数据。
+    """
+
+    return _fetch_dashboard_data(
+        _service(ctx),
+        start=start,
+        end=end,
+        window_days=window_days,
+        top_n=top_n,
+    )
+
+
+@mcp.tool(name="generate_dashboard_insights")
+def tool_generate_dashboard_insights(
+    ctx: Context[ServerSession, DashboardAppContext],
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    window_days: Optional[int] = None,
+) -> Dict[str, Any]:
+    """生成面向运营团队的洞察总结。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 当前调用上下文。
+        start (Optional[str]): 起始日期。
+        end (Optional[str]): 结束日期。
+        window_days (Optional[int]): 回溯天数。
+
+    返回:
+        Dict[str, Any]: 包含洞察文本与汇总数据的字典。
+    """
+
+    return _generate_dashboard_insights(
+        _service(ctx),
+        start=start,
+        end=end,
+        window_days=window_days,
+    )
+
+
+@mcp.tool(name="analyze_dashboard_history")
+def tool_analyze_dashboard_history(
+    ctx: Context[ServerSession, DashboardAppContext],
+    limit: int = 6,
+    metrics: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    """对近期仪表盘摘要进行指标对比分析。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 上下文对象。
+        limit (int): 参与比较的历史摘要数量，默认 6。
+        metrics (Optional[list[str]]): 需要重点比较的指标名称列表。
+
+    返回:
+        Dict[str, Any]: 包括差异分析与时间序列的结构化结果。
+    """
+
+    return _analyze_dashboard_history(
+        _service(ctx),
+        limit=limit,
+        metrics=metrics,
+    )
+
+
+@mcp.tool(name="export_dashboard_history")
+def tool_export_dashboard_history(
+    ctx: Context[ServerSession, DashboardAppContext],
+    limit: int,
+    path: str,
+) -> Dict[str, Any]:
+    """将历史摘要导出为 CSV 文件。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 当前调用上下文。
+        limit (int): 导出的历史记录数量。
+        path (str): CSV 输出路径，可为相对路径。
+
+    返回:
+        Dict[str, Any]: 文件生成结果与提示信息。
+    """
+
+    return _export_dashboard_history(
+        _service(ctx),
+        limit=limit,
+        path=path,
+    )
+
+
+@mcp.tool(name="amazon_bestseller_search")
+def tool_amazon_bestseller_search(
+    ctx: Context[ServerSession, DashboardAppContext],
+    category: str,
+    search_index: str,
+    browse_node_id: Optional[str] = None,
+    max_items: Optional[int] = None,
+) -> Dict[str, Any]:
+    """调用 Amazon PAAPI 查询热销产品。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 调用上下文。
+        category (str): 业务定义的类目名称。
+        search_index (str): PAAPI 使用的搜索索引，如 `Books`。
+        browse_node_id (Optional[str]): 可选的分类节点 ID。
+        max_items (Optional[int]): 返回的最大商品数量。
+
+    返回:
+        Dict[str, Any]: 包含商品信息与分类的结果。
+    """
+
+    return _amazon_bestseller_search(
+        _service(ctx),
+        category=category,
+        search_index=search_index,
+        browse_node_id=browse_node_id,
+        max_items=max_items,
+    )
+
+
+@mcp.tool(name="compute_dashboard_metrics")
+def tool_compute_dashboard_metrics(
+    ctx: Context[ServerSession, DashboardAppContext],
+    start: str,
+    end: str,
+    source: str,
+    sales: list[Dict[str, Any]],
+    traffic: list[Dict[str, Any]],
+    top_n: Optional[int] = None,
+) -> Dict[str, Any]:
+    """根据原始数据计算 KPI 并进行存储。
+
+    参数:
+        ctx (Context[ServerSession, DashboardAppContext]): 调用上下文。
+        start (str): 起始日期。
+        end (str): 结束日期。
+        source (str): 数据来源标识。
+        sales (list[Dict[str, Any]]): 销售数据列表。
+        traffic (list[Dict[str, Any]]): 流量数据列表。
+        top_n (Optional[int]): 需要保留的重点商品数量。
+
+    返回:
+        Dict[str, Any]: 计算后的 KPI 摘要与存储结果。
+    """
+
+    return _compute_dashboard_metrics(
+        _service(ctx),
+        start=start,
+        end=end,
+        source=source,
+        sales=sales,
+        traffic=traffic,
+        top_n=top_n,
+    )
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    """命令行入口，支持选择不同的 MCP 传输方式。
+
+    参数:
+        argv (Optional[list[str]]): 可选的命令行参数列表，通常由 `argparse` 自动填充。
+
+    返回:
+        None
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Run the Operations Dashboard MCP server."
+    )
+    parser.add_argument(
+        "transport",
+        nargs="?",
+        default="stdio",
+        choices=["stdio", "sse", "streamable-http"],
+        help="Transport mechanism to expose (default: stdio).",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Optional host binding for HTTP-based transports.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Optional port binding for HTTP-based transports.",
+    )
+    args = parser.parse_args(argv)
+
+    run_kwargs: Dict[str, Any] = {"transport": args.transport}
+    if args.host:
+        run_kwargs["host"] = args.host
+    if args.port is not None:
+        run_kwargs["port"] = args.port
+
+    mcp.run(**run_kwargs)
+
+
+if __name__ == "__main__":
+    main()

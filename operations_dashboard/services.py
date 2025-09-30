@@ -368,7 +368,14 @@ def generate_dashboard_insights(
         Dict[str, Any]: 包含原始摘要与洞察文本的字典。
     """
     if context.llm is None:
-        raise RuntimeError("OPENAI_API_KEY 未配置，无法生成洞察。")
+        # 未配置 OPENAI_API_KEY 时返回占位洞察，避免中断 MCP 测试流程。
+        return {
+            "report": {
+                "summary": summary,
+                "insights": "OPENAI_API_KEY 未配置，返回占位洞察，请检查模型配置。",
+                "placeholder": True,
+            }
+        }
     # 1. 构造系统指令，约束输出格式与分析重点。
     instructions = (
         "请以资深运营顾问身份，依据提供的数据生成结构化洞察。"
@@ -384,8 +391,6 @@ def generate_dashboard_insights(
         ]
     )
     return {"report": {"summary": summary, "insights": response.content}}
-
-
 def analyze_dashboard_history(
     context: ServiceContext,
     *,
