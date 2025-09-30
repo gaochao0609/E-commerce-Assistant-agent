@@ -1,0 +1,8 @@
+﻿langchain
+langchain-openai
+langgraph
+fastapi
+pydantic
+uvicorn
+requests
+python-amazon-paapi
