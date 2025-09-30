@@ -1,4 +1,4 @@
-﻿"""运营仪表盘服务层，封装数据读取、指标计算以及 MCP 桥接调用的业务逻辑。"""
+﻿"""运营仪表盘服务层，封装数据读取、指标计算以及 MCP 集成的业务逻辑。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,13 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from amazon_paapi import AmazonApi
-from amazon_paapi.models import SortBy
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+except ImportError:  # pragma: no cover - optional dependency
+    ChatOpenAI = None  # type: ignore[assignment]
+    HumanMessage = None  # type: ignore[assignment]
+    SystemMessage = None  # type: ignore[assignment]
 
 from .config import AppConfig
 from .data_sources.amazon_business_reports import create_default_mock_source
@@ -78,7 +81,7 @@ def create_service_context(
     if repository is None and config.storage.enabled:
         repository = SQLiteRepository(config.storage.db_path)
     # 3. 在存在 OPENAI_API_KEY 时懒加载 LLM，便于后续生成洞察。
-    if llm is None and os.getenv("OPENAI_API_KEY"):
+    if llm is None and os.getenv("OPENAI_API_KEY") and ChatOpenAI is not None:
         llm = ChatOpenAI(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-3.5-turbo", temperature=0)
     return ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
 
@@ -529,6 +532,12 @@ def amazon_bestseller_search(
     返回:
         Dict[str, Any]: 包含畅销商品列表的字典。
     """
+    try:
+        from amazon_paapi import AmazonApi
+        from amazon_paapi.models import SortBy
+    except ImportError as exc:
+        raise RuntimeError("python-amazon-paapi 未安装，无法调用 amazon_bestseller_search。") from exc
+
     amazon_conf = context.config.amazon
     # 1. 基础凭证缺失时拒绝请求，避免调用失败消耗额度。
     if amazon_conf.access_key in {"", "mock"} or amazon_conf.secret_key in {"", "mock"}:

@@ -1,0 +1,17 @@
+[project]
+name = "operations-dashboard"
+version = "0.1.0"
+dependencies = [
+  "langchain",
+  "langchain-openai",
+  "langgraph",
+  "python-amazon-paapi",
+  "mcp[cli]"
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["operations_dashboard"]

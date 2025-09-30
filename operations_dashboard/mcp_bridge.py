@@ -152,3 +152,4 @@ def call_mcp_tool(tool_name: str, args: Dict[str, Any]) -> Any:
     finally:
         if loop is not None:
             loop.close()
+

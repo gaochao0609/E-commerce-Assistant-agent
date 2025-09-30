@@ -1,7 +1,12 @@
-# operations_dashboard/test.py
+﻿# operations_dashboard/test.py
+import asyncio
 import os
 
-os.environ["USE_MCP_BRIDGE"] = "1"  # 必须在导入 agent 之前
+from mcp import ClientSession
+from mcp.client.http import connect_streamable_http
+
+# Ensure the agent routes tool calls through the MCP bridge before importing it.
+os.environ["USE_MCP_BRIDGE"] = "1"
 
 from operations_dashboard.agent import run_agent_demo
 from operations_dashboard.config import (
@@ -10,6 +15,23 @@ from operations_dashboard.config import (
     DashboardConfig,
     StorageConfig,
 )
+
+
+def _verify_streamable_http(server_url: str) -> None:
+    """Connect via streamable HTTP and list available tools to confirm the MCP server."""
+
+    async def _probe() -> None:
+        async with connect_streamable_http(server_url) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                print(f"Discovered tools: {[tool.name for tool in tools.tools]}")
+
+    try:
+        asyncio.run(_probe())
+    except Exception as exc:  # pragma: no cover - manual diagnostics helper
+        raise RuntimeError(f"Failed to reach MCP server at {server_url}: {exc}") from exc
+
 
 def main() -> None:
     config = AppConfig(
@@ -27,8 +49,13 @@ def main() -> None:
         storage=StorageConfig(enabled=False),
     )
 
-    result = run_agent_demo(config, "请生成最近7天的运营日报，并给出重点洞察")
+    result = run_agent_demo(config, "Generate the latest daily operations report with key insights.")
     print(result)
+
+    server_url = os.getenv("MCP_SERVER_URL")
+    if server_url:
+        _verify_streamable_http(server_url)
+
 
 if __name__ == "__main__":
     main()

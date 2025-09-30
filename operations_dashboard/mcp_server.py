@@ -1,6 +1,5 @@
-﻿"""Operations Dashboard MCP 服务器，基于 FastMCP SDK 暴露运营工具与资源。"""
+﻿"""Operations Dashboard MCP server implemented with FastMCP."""
 
-from __future__ import annotations
 
 import argparse
 from collections.abc import AsyncIterator
@@ -30,23 +29,15 @@ from operations_dashboard.services import (
 from operations_dashboard.storage.repository import StoredSummary
 
 
-@dataclass
 class DashboardAppContext:
-    """封装 MCP 生命周期中共享的服务上下文。
+    """Objects shared for the lifetime of the MCP server."""
 
-    属性:
-        service_context (ServiceContext): 预先构建好的服务上下文，包含数据源、存储与 LLM。
-    """
-
-    service_context: ServiceContext
+    def __init__(self, service_context: ServiceContext) -> None:
+        self.service_context = service_context
 
 
 def _load_config() -> AppConfig:
-    """加载应用配置，缺省时退回到安全的 Mock 配置。
-
-    返回:
-        AppConfig: 含 Amazon 凭证、仪表盘默认参数及存储配置的完整对象。
-    """
+    """Load configuration from the environment with safe fallbacks."""
 
     try:
         return AppConfig.from_env()
@@ -65,20 +56,14 @@ def _load_config() -> AppConfig:
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[DashboardAppContext]:
-    """在服务器生命周期内创建并共享 ServiceContext。
-
-    参数:
-        server (FastMCP): FastMCP 服务器实例（未直接使用，兼容接口签名）。
-
-    生成:
-        DashboardAppContext: 提供给工具与资源访问的共享上下文对象。
-    """
+    """Create a shared `ServiceContext` for the lifetime of the FastMCP server."""
 
     config = _load_config()
     service_context = create_service_context(config)
     try:
         yield DashboardAppContext(service_context=service_context)
     finally:
+        # Nothing to clean up yet – placeholder for future teardown.
         pass
 
 
@@ -90,30 +75,23 @@ mcp = FastMCP(
     ),
     lifespan=app_lifespan,
 )
+# Help the MCP Inspector install required third-party packages automatically.
+mcp.dependencies = [
+    "langchain",
+    "langchain-openai",
+    "langgraph",
+    "python-amazon-paapi",
+]
 
 
-def _service(ctx: Context[ServerSession, DashboardAppContext]) -> ServiceContext:
-    """从上下文中提取共享的 ServiceContext。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): FastMCP 注入的请求上下文。
-
-    返回:
-        ServiceContext: 当前会话可复用的业务服务上下文。
-    """
+def _service(ctx: Context) -> ServiceContext:
+    """Access the shared `ServiceContext` from the request context."""
 
     return ctx.app.service_context
 
 
 def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
-    """将 SQLite 中的存储摘要转换为 JSON 友好的结构。
-
-    参数:
-        summary (StoredSummary): 存储层返回的仪表盘摘要对象。
-
-    返回:
-        Dict[str, Any]: 包含基础统计与产品列表的字典结构。
-    """
+    """Convert a stored dashboard summary into JSON-ready data."""
 
     return {
         "id": summary.id,
@@ -143,15 +121,8 @@ def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
 
 
 @mcp.resource("operations-dashboard://config")
-def read_configuration(ctx: Context[ServerSession, DashboardAppContext]) -> Dict[str, Any]:
-    """暴露运行时使用的仪表盘配置。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): FastMCP 自动注入的上下文对象。
-
-    返回:
-        Dict[str, Any]: 包含市场、窗口长度、TopN 与存储配置的字典。
-    """
+def read_configuration(ctx: Context) -> Dict[str, Any]:
+    """Expose the active dashboard configuration."""
 
     service_context = _service(ctx)
     config = service_context.config
@@ -164,20 +135,12 @@ def read_configuration(ctx: Context[ServerSession, DashboardAppContext]) -> Dict
     }
 
 
-@mcp.resource("operations-dashboard://history/{limit:int}")
+@mcp.resource("operations-dashboard://history/{limit}")
 def read_recent_history(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     limit: int = 5,
 ) -> Dict[str, Any]:
-    """读取最近的仪表盘摘要历史。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 请求上下文。
-        limit (int): 需要返回的历史记录条数，默认 5。
-
-    返回:
-        Dict[str, Any]: 若启用存储返回摘要列表，否则返回提示信息。
-    """
+    """Return recent persisted dashboard summaries when storage is enabled."""
 
     service_context = _service(ctx)
     repository = service_context.repository
@@ -190,24 +153,13 @@ def read_recent_history(
 
 @mcp.tool(name="fetch_dashboard_data")
 def tool_fetch_dashboard_data(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     start: Optional[str] = None,
     end: Optional[str] = None,
     window_days: Optional[int] = None,
     top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """获取指定时间窗口的原始销售与流量数据。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 当前工具调用的上下文。
-        start (Optional[str]): ISO 日期字符串，表示起始日期。
-        end (Optional[str]): ISO 日期字符串，表示结束日期。
-        window_days (Optional[int]): 未提供 start/end 时的回溯天数。
-        top_n (Optional[int]): 希望包含的重点商品数量。
-
-    返回:
-        Dict[str, Any]: 包含销售、流量与商品清单的原始数据。
-    """
+    """Fetch raw sales and traffic data for a given window."""
 
     return _fetch_dashboard_data(
         _service(ctx),
@@ -220,22 +172,12 @@ def tool_fetch_dashboard_data(
 
 @mcp.tool(name="generate_dashboard_insights")
 def tool_generate_dashboard_insights(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     start: Optional[str] = None,
     end: Optional[str] = None,
     window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """生成面向运营团队的洞察总结。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 当前调用上下文。
-        start (Optional[str]): 起始日期。
-        end (Optional[str]): 结束日期。
-        window_days (Optional[int]): 回溯天数。
-
-    返回:
-        Dict[str, Any]: 包含洞察文本与汇总数据的字典。
-    """
+    """Generate natural-language insights for the requested timeframe."""
 
     return _generate_dashboard_insights(
         _service(ctx),
@@ -247,20 +189,11 @@ def tool_generate_dashboard_insights(
 
 @mcp.tool(name="analyze_dashboard_history")
 def tool_analyze_dashboard_history(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     limit: int = 6,
     metrics: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
-    """对近期仪表盘摘要进行指标对比分析。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 上下文对象。
-        limit (int): 参与比较的历史摘要数量，默认 6。
-        metrics (Optional[list[str]]): 需要重点比较的指标名称列表。
-
-    返回:
-        Dict[str, Any]: 包括差异分析与时间序列的结构化结果。
-    """
+    """Compare recent dashboard summaries to highlight trends."""
 
     return _analyze_dashboard_history(
         _service(ctx),
@@ -271,20 +204,11 @@ def tool_analyze_dashboard_history(
 
 @mcp.tool(name="export_dashboard_history")
 def tool_export_dashboard_history(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     limit: int,
     path: str,
 ) -> Dict[str, Any]:
-    """将历史摘要导出为 CSV 文件。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 当前调用上下文。
-        limit (int): 导出的历史记录数量。
-        path (str): CSV 输出路径，可为相对路径。
-
-    返回:
-        Dict[str, Any]: 文件生成结果与提示信息。
-    """
+    """Export stored dashboard history to a CSV file."""
 
     return _export_dashboard_history(
         _service(ctx),
@@ -295,24 +219,13 @@ def tool_export_dashboard_history(
 
 @mcp.tool(name="amazon_bestseller_search")
 def tool_amazon_bestseller_search(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     category: str,
     search_index: str,
     browse_node_id: Optional[str] = None,
     max_items: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """调用 Amazon PAAPI 查询热销产品。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 调用上下文。
-        category (str): 业务定义的类目名称。
-        search_index (str): PAAPI 使用的搜索索引，如 `Books`。
-        browse_node_id (Optional[str]): 可选的分类节点 ID。
-        max_items (Optional[int]): 返回的最大商品数量。
-
-    返回:
-        Dict[str, Any]: 包含商品信息与分类的结果。
-    """
+    """Query Amazon PAAPI for best-selling products in the requested category."""
 
     return _amazon_bestseller_search(
         _service(ctx),
@@ -325,7 +238,7 @@ def tool_amazon_bestseller_search(
 
 @mcp.tool(name="compute_dashboard_metrics")
 def tool_compute_dashboard_metrics(
-    ctx: Context[ServerSession, DashboardAppContext],
+    ctx: Context,
     start: str,
     end: str,
     source: str,
@@ -333,20 +246,7 @@ def tool_compute_dashboard_metrics(
     traffic: list[Dict[str, Any]],
     top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """根据原始数据计算 KPI 并进行存储。
-
-    参数:
-        ctx (Context[ServerSession, DashboardAppContext]): 调用上下文。
-        start (str): 起始日期。
-        end (str): 结束日期。
-        source (str): 数据来源标识。
-        sales (list[Dict[str, Any]]): 销售数据列表。
-        traffic (list[Dict[str, Any]]): 流量数据列表。
-        top_n (Optional[int]): 需要保留的重点商品数量。
-
-    返回:
-        Dict[str, Any]: 计算后的 KPI 摘要与存储结果。
-    """
+    """Compute KPIs from raw sales and traffic payloads and persist the summary."""
 
     return _compute_dashboard_metrics(
         _service(ctx),
@@ -360,14 +260,7 @@ def tool_compute_dashboard_metrics(
 
 
 def main(argv: Optional[list[str]] = None) -> None:
-    """命令行入口，支持选择不同的 MCP 传输方式。
-
-    参数:
-        argv (Optional[list[str]]): 可选的命令行参数列表，通常由 `argparse` 自动填充。
-
-    返回:
-        None
-    """
+    """Command-line entry point that mirrors the FastMCP CLI."""
 
     parser = argparse.ArgumentParser(
         description="Run the Operations Dashboard MCP server."
@@ -392,14 +285,14 @@ def main(argv: Optional[list[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    run_kwargs: Dict[str, Any] = {"transport": args.transport}
     if args.host:
-        run_kwargs["host"] = args.host
+        mcp.settings.host = args.host
     if args.port is not None:
-        run_kwargs["port"] = args.port
+        mcp.settings.port = args.port
 
-    mcp.run(**run_kwargs)
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
     main()
+
