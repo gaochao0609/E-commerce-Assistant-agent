@@ -4,7 +4,7 @@ import os
 
 try:
     from mcp import ClientSession
-    from mcp.client.http import connect_streamable_http
+    from mcp.client.streamable_http import streamablehttp_client
 except ImportError as exc:
     raise RuntimeError("未找到 mcp 客户端，请先执行 pip install -r requirements.txt") from exc
 
@@ -24,7 +24,7 @@ def _verify_streamable_http(server_url: str) -> None:
     """Connect via streamable HTTP and list available tools to confirm the MCP server."""
 
     async def _probe() -> None:
-        async with connect_streamable_http(server_url) as (read, write):
+        async with streamablehttp_client(server_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
@@ -62,3 +62,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
