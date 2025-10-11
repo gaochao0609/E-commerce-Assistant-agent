@@ -3,3 +3,4 @@ langchain-openai
 langgraph
 mcp[cli]
 python-amazon-paapi
+typing_extensions

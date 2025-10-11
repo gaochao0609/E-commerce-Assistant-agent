@@ -82,7 +82,7 @@ def create_service_context(
         repository = SQLiteRepository(config.storage.db_path)
     # 3. 在存在 OPENAI_API_KEY 时懒加载 LLM，便于后续生成洞察。
     if llm is None and os.getenv("OPENAI_API_KEY") and ChatOpenAI is not None:
-        llm = ChatOpenAI(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-3.5-turbo", temperature=0)
+        llm = ChatOpenAI(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-5-mini", temperature=0)
     return ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
 
 
@@ -354,46 +354,94 @@ def compute_dashboard_metrics(
     return {"summary": summary_to_dict(summary)}
 
 
+
+
 def generate_dashboard_insights(
     context: ServiceContext,
     *,
-    summary: Dict[str, Any],
+    summary: Optional[Dict[str, Any]] = None,
     focus: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    window_days: Optional[int] = None,
+    top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     功能说明:
         调用配置好的 LLM 依据 KPI 摘要生成结构化洞察。
+        当未提供摘要时，会根据指定的时间窗口自动计算。
     参数:
         context (ServiceContext): 服务上下文，需包含 LLM。
-        summary (Dict[str, Any]): 聚合后的 KPI 摘要。
+        summary (Optional[Dict[str, Any]]): 聚合后的 KPI 摘要，缺失时会触发自动计算。
         focus (Optional[str]): 需要额外关注的主题维度。
+        start (Optional[str]): 自动计算时使用的开始日期（ISO 字符串）。
+        end (Optional[str]): 自动计算时使用的结束日期（ISO 字符串）。
+        window_days (Optional[int]): 未指定日期时的回溯天数。
+        top_n (Optional[int]): 自动计算摘要时需要返回的重点商品数量。
     返回:
         Dict[str, Any]: 包含原始摘要与洞察文本的字典。
     """
-    if context.llm is None:
-        # 未配置 OPENAI_API_KEY 时返回占位洞察，避免中断 MCP 测试流程。
+    working_summary = summary
+    if working_summary is None:
+        data = fetch_dashboard_data(
+            context,
+            start=start,
+            end=end,
+            window_days=window_days,
+            top_n=top_n,
+        )
+        metrics = compute_dashboard_metrics(
+            context,
+            start=data.get("start", start or ""),
+            end=data.get("end", end or ""),
+            source=data.get("source", context.config.dashboard.marketplace),
+            sales=data.get("sales", []),
+            traffic=data.get("traffic", []),
+            top_n=top_n,
+        )
+        working_summary = metrics.get("summary")
+
+    if working_summary is None:
         return {
             "report": {
-                "summary": summary,
+                "summary": {},
+                "insights": "暂时无法计算摘要，请检查输入数据。",
+                "placeholder": True,
+            }
+        }
+
+    if context.llm is None:
+        return {
+            "report": {
+                "summary": working_summary,
                 "insights": "OPENAI_API_KEY 未配置，返回占位洞察，请检查模型配置。",
                 "placeholder": True,
             }
         }
-    # 1. 构造系统指令，约束输出格式与分析重点。
     instructions = (
         "请以资深运营顾问身份，依据提供的数据生成结构化洞察。"
         "优先关注“销量趋势、流量变化、转化率、退款”这些主题。"
     )
     if focus:
         instructions += f" 特别关注 {focus}。"
-    # 2. 以 JSON 摘要作为人类消息传入模型，获取分析结果。
-    response = context.llm.invoke(
-        [
-            SystemMessage(content=instructions),
-            HumanMessage(content=f"以下是最新的 JSON 数据：{summary}"),
-        ]
-    )
-    return {"report": {"summary": summary, "insights": response.content}}
+    try:
+        response = context.llm.invoke(
+            [
+                SystemMessage(content=instructions),
+                HumanMessage(content=f"请分析下面的 JSON 数据：{working_summary}"),
+            ]
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning("LLM 调用失败，返回占位结果: %s", exc)
+        return {
+            "report": {
+                "summary": working_summary,
+                "insights": "暂时无法调用 LLM 生成洞察。",
+                "placeholder": True,
+            }
+        }
+    return {"report": {"summary": working_summary, "insights": response.content}}
+
 def analyze_dashboard_history(
     context: ServiceContext,
     *,

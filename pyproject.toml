@@ -6,7 +6,8 @@ dependencies = [
   "langchain-openai",
   "langgraph",
   "python-amazon-paapi",
-  "mcp[cli]"
+  "mcp[cli]",
+  "typing_extensions"
 ]
 
 [build-system]

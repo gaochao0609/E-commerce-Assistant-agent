@@ -74,7 +74,7 @@ def build_operations_agent(
         llm_for_services = (
             ChatOpenAI(
                 api_key=os.environ.get("OPENAI_API_KEY"),
-                model="gpt-3.5-turbo",
+                model="gpt-5-mini",
                 temperature=0,
             )
             if os.getenv("OPENAI_API_KEY")
@@ -87,7 +87,7 @@ def build_operations_agent(
     # 2. 构建 Agent 主体使用的对话模型（与服务内部模型可不同）。
     llm = ChatOpenAI(
         api_key=os.environ.get("OPENAI_API_KEY"),
-        model="gpt-3.5-turbo",
+        model="gpt-5-mini",
         temperature=0,
     )
 

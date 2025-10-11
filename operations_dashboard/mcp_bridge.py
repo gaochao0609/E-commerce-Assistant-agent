@@ -71,7 +71,14 @@ def _server_parameters() -> StdioServerParameters:
 
     command = DEFAULT_COMMAND
     args = _parse_args(DEFAULT_ARGS)
-    env = _parse_env(DEFAULT_ENV)
+    overrides = _parse_env(DEFAULT_ENV)
+    env: Optional[Dict[str, str]]
+    if overrides is None:
+        env = None
+    else:
+        base_env = dict(os.environ)
+        base_env.update(overrides)
+        env = base_env
     return StdioServerParameters(command=command, args=args, env=env)
 
 

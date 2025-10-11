@@ -3,7 +3,9 @@
 import argparse
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, TypedDict, cast
+from typing import Any, Dict, List, Optional, cast
+
+from typing_extensions import TypedDict
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
