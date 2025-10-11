@@ -136,34 +136,62 @@ def build_operations_agent(
         start: str,
         end: str,
         source: str,
-        sales: List[Dict[str, Any]],
-        traffic: List[Dict[str, Any]],
+        sales: Optional[List[Dict[str, Any]]] = None,
+        traffic: Optional[List[Dict[str, Any]]] = None,
         top_n: Optional[int] = None,
+        window_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         功能说明:
-            在原始销量/流量数据基础上计算核心 KPI 指标。
+            计算指定时间窗口内的 KPI，若缺少销售或流量数据会自动调用 `fetch_dashboard_data` 补齐。
         参数:
-            start (str): 分析窗口的开始日期。
-            end (str): 分析窗口的结束日期。
-            source (str): 数据来源标识，便于后续追踪。
-            sales (List[Dict[str, Any]]): 已序列化的销量记录列表。
-            traffic (List[Dict[str, Any]]): 已序列化的流量记录列表。
-            top_n (Optional[int]): 需要保留的 top 商品数量，覆盖默认配置。
+            start (str): 指标计算的开始日期，ISO 格式。
+            end (str): 指标计算的结束日期，ISO 格式。
+            source (str): 数据来源标识，用于摘要说明。
+            sales (Optional[List[Dict[str, Any]]]): 销售数据列表；传入 None 时自动拉取。
+            traffic (Optional[List[Dict[str, Any]]]): 流量数据列表；传入 None 时自动拉取。
+            top_n (Optional[int]): 重点商品数量；默认使用配置值。
+            window_days (Optional[int]): 当 start/end 缺失时使用的滚动窗口天数。
         返回:
-            Dict[str, Any]: 汇总 KPI 与 top 商品指标的结构化结果。
+            Dict[str, Any]: 包含 `summary` 键的结构化指标结果。
         """
-        remote = _call_mcp_bridge(
-            "compute_dashboard_metrics",
-            {
-                "start": start,
-                "end": end,
-                "source": source,
-                "sales": sales,
-                "traffic": traffic,
+        data: Dict[str, Any] | None = None
+        if sales is None or traffic is None:
+            fetch_args: Dict[str, Any] = {
+                "start": start or None,
+                "end": end or None,
+                "window_days": window_days,
                 "top_n": top_n,
-            },
-        )
+            }
+            fetch_args = {k: v for k, v in fetch_args.items() if v not in (None, "")}
+            remote_fetch = _call_mcp_bridge("fetch_dashboard_data", fetch_args)
+            if isinstance(remote_fetch, dict):
+                data = remote_fetch
+            if data is None:
+                data = fetch_dashboard_data(
+                    context,
+                    start=start,
+                    end=end,
+                    window_days=window_days,
+                    top_n=top_n,
+                )
+            sales = data.get("sales")
+            traffic = data.get("traffic")
+            start = data.get("start") or start
+            end = data.get("end") or end
+            source = data.get("source") or source or context.config.dashboard.marketplace
+            if sales is None or traffic is None:
+                raise RuntimeError("无法获取销售或流量数据，无法计算指标。")
+
+        payload = {
+            "start": start,
+            "end": end,
+            "source": source,
+            "sales": sales,
+            "traffic": traffic,
+            "top_n": top_n,
+        }
+        remote = _call_mcp_bridge("compute_dashboard_metrics", payload)
         if isinstance(remote, dict):
             return remote
         return compute_dashboard_metrics(
@@ -176,28 +204,6 @@ def build_operations_agent(
             top_n=top_n,
         )
 
-    @tool("generate_dashboard_insights")
-    def generate_dashboard_insights_tool(
-        summary: Dict[str, Any],
-        focus: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        功能说明:
-            利用 LLM 或远端 MCP 服务生成结构化的运营洞察。
-        参数:
-            summary (Dict[str, Any]): 经过聚合后的 KPI 摘要。
-            focus (Optional[str]): 需要重点分析的主题维度，例如转化、库存等。
-        返回:
-            Dict[str, Any]: 包含结论与建议的结构化文本或段落。
-        """
-        remote = _call_mcp_bridge(
-            "generate_dashboard_insights",
-            {"summary": summary, "focus": focus},
-        )
-        if isinstance(remote, dict):
-            return remote
-        return generate_dashboard_insights(context, summary=summary, focus=focus)
-
     @tool("analyze_dashboard_history")
     def analyze_dashboard_history_tool(
         limit: int = 6,
@@ -205,20 +211,82 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         功能说明:
-            计算最近若干期的环比/同比数据，便于识别趋势波动。
+            对最近的指标摘要做横向对比并返回趋势与时间序列。
         参数:
-            limit (int): 需要纳入分析的历史快照数量，默认 6 期。
-            metrics (Optional[List[str]]): 限定要比较的指标列表，`None` 表示分析全部指标。
+            limit (int): 参与比较的历史摘要数量。
+            metrics (Optional[List[str]]): 需要关注的指标列表；为空时返回全部指标。
         返回:
-            Dict[str, Any]: 包含趋势对比、增长率等信息的结构化结果。
+            Dict[str, Any]: 包含对比分析与时间序列数据。
         """
-        remote = _call_mcp_bridge(
-            "analyze_dashboard_history",
-            {"limit": limit, "metrics": metrics},
-        )
+        payload: Dict[str, Any] = {"limit": limit, "metrics": metrics}
+        remote = _call_mcp_bridge("analyze_dashboard_history", payload)
         if isinstance(remote, dict):
             return remote
         return analyze_dashboard_history(context, limit=limit, metrics=metrics)
+
+    @tool("generate_dashboard_insights")
+    def generate_dashboard_insights_tool(
+        summary: Optional[Dict[str, Any]] = None,
+        focus: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        window_days: Optional[int] = None,
+        top_n: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        功能说明:
+            生成运营洞察；当 `summary` 缺失时会自动先计算 KPI 摘要。
+        参数:
+            summary (Optional[Dict[str, Any]]): 指标摘要，缺失时由函数内部计算。
+            focus (Optional[str]): 洞察重点，例如 'sales'。
+            start (Optional[str]): 重新计算指标时使用的开始日期。
+            end (Optional[str]): 重新计算指标时使用的结束日期。
+            window_days (Optional[int]): 重新计算时的滚动窗口天数。
+            top_n (Optional[int]): 指标计算时的重点商品数量。
+        返回:
+            Dict[str, Any]: 包含洞察文本及摘要信息的结构化结果。
+        """
+        working_summary = summary
+        if working_summary is None:
+            fetch_args: Dict[str, Any] = {
+                "start": start or None,
+                "end": end or None,
+                "window_days": window_days,
+                "top_n": top_n,
+            }
+            fetch_args = {k: v for k, v in fetch_args.items() if v not in (None, "")}
+            data = _call_mcp_bridge("fetch_dashboard_data", fetch_args)
+            if not isinstance(data, dict):
+                data = fetch_dashboard_data(
+                    context,
+                    start=start,
+                    end=end,
+                    window_days=window_days,
+                    top_n=top_n,
+                )
+            data_start = data.get("start") or start
+            data_end = data.get("end") or end
+            data_source = data.get("source") or context.config.dashboard.marketplace
+            metrics_result = compute_dashboard_metrics(
+                context,
+                start=data_start,
+                end=data_end,
+                source=data_source,
+                sales=data.get("sales", []),
+                traffic=data.get("traffic", []),
+                top_n=top_n,
+            )
+            working_summary = metrics_result.get("summary")
+            if working_summary is None:
+                raise RuntimeError("无法获取指标摘要，无法生成洞察。")
+
+        payload: Dict[str, Any] = {"summary": working_summary}
+        if focus is not None:
+            payload["focus"] = focus
+        remote = _call_mcp_bridge("generate_dashboard_insights", payload)
+        if isinstance(remote, dict):
+            return remote
+        return generate_dashboard_insights(context, summary=working_summary, focus=focus)
 
     @tool("export_dashboard_history")
     def export_dashboard_history_tool(
@@ -227,20 +295,19 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         功能说明:
-            将历史汇总数据导出为 CSV 文件，便于二次分析。
+            将最近的指标摘要导出为 CSV 文件。
         参数:
             limit (int): 导出的历史记录数量。
-            path (str): CSV 输出路径，若为相对路径则基于当前工作目录。
+            path (str): CSV 输出路径，可以是相对路径。
         返回:
             Dict[str, Any]: 包含导出状态与文件路径的反馈信息。
         """
-        remote = _call_mcp_bridge(
-            "export_dashboard_history",
-            {"limit": limit, "path": path},
-        )
+        payload = {"limit": limit, "path": path}
+        remote = _call_mcp_bridge("export_dashboard_history", payload)
         if isinstance(remote, dict):
             return remote
         return export_dashboard_history(context, limit=limit, path=path)
+
 
     @tool("amazon_bestseller_search")
     def amazon_bestseller_search_tool(

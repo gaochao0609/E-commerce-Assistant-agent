@@ -7,6 +7,8 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+os.environ["MCP_BRIDGE_COMMAND"] = sys.executable
+os.environ.setdefault("MCP_BRIDGE_ARGS", '["-m", "operations_dashboard.mcp_server"]')
 
 try:
     from mcp import ClientSession

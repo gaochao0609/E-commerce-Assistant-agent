@@ -107,15 +107,34 @@ async def _call_tool_async(tool_name: str, arguments: Dict[str, Any]) -> Any:
             if result.structuredContent is not None:
                 return result.structuredContent
 
+            normalized_blocks: list[dict[str, Any]] = []
             for block in result.content:
                 if isinstance(block, TextContent):
-                    return block.text
+                    normalized_blocks.append({"type": "text", "text": block.text})
+                    continue
                 if isinstance(block, EmbeddedResource):
                     resource = block.resource
+                    resource_payload: dict[str, Any] = {"type": "embedded_resource"}
+                    uri = getattr(resource, "uri", None)
+                    if uri is not None:
+                        resource_payload["uri"] = uri
                     text = getattr(resource, "text", None)
                     if text is not None:
-                        return text
-            return None
+                        resource_payload["text"] = text
+                    data = getattr(resource, "data", None)
+                    if data is not None:
+                        resource_payload["data"] = data
+                    normalized_blocks.append(resource_payload)
+                    continue
+                normalized_blocks.append(
+                    {"type": type(block).__name__, "repr": repr(block)}
+                )
+
+            if not normalized_blocks:
+                return None
+            if len(normalized_blocks) == 1 and normalized_blocks[0]["type"] == "text":
+                return normalized_blocks[0]["text"]
+            return normalized_blocks
 
 
 def call_mcp_tool(tool_name: str, args: Dict[str, Any]) -> Any:
@@ -152,4 +171,3 @@ def call_mcp_tool(tool_name: str, args: Dict[str, Any]) -> Any:
     finally:
         if loop is not None:
             loop.close()
-

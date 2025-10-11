@@ -3,7 +3,7 @@
 import argparse
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, TypedDict, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
@@ -25,6 +25,118 @@ from operations_dashboard.services import (
     generate_dashboard_insights as _generate_dashboard_insights,
 )
 from operations_dashboard.storage.repository import StoredSummary
+
+
+GLOBAL_SERVICE_CONTEXT: Optional[ServiceContext] = None
+
+
+class SalesRecordPayload(TypedDict):
+    day: str
+    asin: str
+    title: str
+    units_ordered: int
+    ordered_revenue: float
+    sessions: int
+    conversions: float
+    refunds: int
+
+
+class TrafficRecordPayload(TypedDict):
+    day: str
+    asin: str
+    sessions: int
+    page_views: int
+    buy_box_percentage: float
+
+
+class FetchDashboardDataResult(TypedDict):
+    start: str
+    end: str
+    source: str
+    sales: List[SalesRecordPayload]
+    traffic: List[TrafficRecordPayload]
+    top_n: Optional[int]
+
+
+class SummaryWindowPayload(TypedDict):
+    start: str
+    end: str
+
+
+class SummaryTotalsPayload(TypedDict):
+    revenue: float
+    units: int
+    sessions: int
+    conversion_rate: float
+    refund_rate: float
+
+
+class SummaryProductPayload(TypedDict):
+    asin: str
+    title: str
+    revenue: float
+    units: int
+    sessions: int
+    conversion_rate: float
+    refunds: int
+    buy_box_percentage: Optional[float]
+
+
+class DashboardSummaryPayload(TypedDict):
+    source: str
+    window: SummaryWindowPayload
+    totals: SummaryTotalsPayload
+    top_products: List[SummaryProductPayload]
+
+
+class ComputeDashboardMetricsResult(TypedDict):
+    summary: DashboardSummaryPayload
+
+
+class GenerateDashboardInsightsReportBase(TypedDict):
+    summary: DashboardSummaryPayload
+    insights: str
+
+
+class GenerateDashboardInsightsReportPayload(
+    GenerateDashboardInsightsReportBase, total=False
+):
+    placeholder: bool
+
+
+class GenerateDashboardInsightsResult(TypedDict):
+    report: GenerateDashboardInsightsReportPayload
+
+
+class MetricGrowthPayload(TypedDict):
+    current: float
+    mom: Optional[float]
+    yoy: Optional[float]
+
+
+class TimeSeriesPointPayload(TypedDict):
+    start: str
+    value: float
+
+
+class AnalyzeDashboardHistoryResult(TypedDict):
+    analysis: Dict[str, MetricGrowthPayload | str]
+    time_series: Dict[str, List[TimeSeriesPointPayload]]
+
+
+class ExportDashboardHistoryResult(TypedDict):
+    message: str
+
+
+class BestsellerItemPayload(TypedDict):
+    asin: Optional[str]
+    title: Optional[str]
+    category: Optional[str]
+    sales_rank: Optional[int]
+
+
+class AmazonBestsellerSearchResult(TypedDict):
+    items: List[BestsellerItemPayload]
 
 
 class DashboardAppContext:
@@ -79,6 +191,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DashboardAppContext]:
 
     config = _load_config()
     service_context = create_service_context(config)
+    if service_context.repository is not None:
+        service_context.repository.initialize()
+    global GLOBAL_SERVICE_CONTEXT
+    GLOBAL_SERVICE_CONTEXT = service_context
     try:
         yield DashboardAppContext(service_context=service_context)
     finally:
@@ -113,7 +229,14 @@ def _service(ctx: Context) -> ServiceContext:
         ServiceContext: 预先构建的业务上下文实例。
     """
 
-    return ctx.app.service_context
+    if hasattr(ctx, "fastmcp") and getattr(ctx.fastmcp, "settings", None):
+        try:
+            return ctx.fastmcp.app_context.service_context  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+    if GLOBAL_SERVICE_CONTEXT is not None:
+        return GLOBAL_SERVICE_CONTEXT
+    raise RuntimeError("Service context is not available; lifespan may not be initialized.")
 
 
 def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
@@ -194,7 +317,6 @@ def read_recent_history(
     repository = service_context.repository
     if not repository:
         return {"message": "Storage is disabled for this deployment."}
-    repository.initialize()
     summaries = repository.fetch_recent_summaries(limit=limit)
     return {"summaries": [_summary_to_dict(summary) for summary in summaries]}
 
@@ -206,7 +328,7 @@ def tool_fetch_dashboard_data(
     end: Optional[str] = None,
     window_days: Optional[int] = None,
     top_n: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> FetchDashboardDataResult:
     """获取指定时间窗口内的原始销售与流量数据。
 
     Args:
@@ -220,13 +342,14 @@ def tool_fetch_dashboard_data(
         Dict[str, Any]: 含有销售、流量及商品列表的原始数据结构。
     """
 
-    return _fetch_dashboard_data(
+    result = _fetch_dashboard_data(
         _service(ctx),
         start=start,
         end=end,
         window_days=window_days,
         top_n=top_n,
     )
+    return cast(FetchDashboardDataResult, result)
 
 
 @mcp.tool(name="generate_dashboard_insights")
@@ -235,7 +358,7 @@ def tool_generate_dashboard_insights(
     start: Optional[str] = None,
     end: Optional[str] = None,
     window_days: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> GenerateDashboardInsightsResult:
     """基于业务服务生成自然语言洞察。
 
     Args:
@@ -248,12 +371,13 @@ def tool_generate_dashboard_insights(
         Dict[str, Any]: 结构化洞察结果，包含原始摘要与文本说明。
     """
 
-    return _generate_dashboard_insights(
+    result = _generate_dashboard_insights(
         _service(ctx),
         start=start,
         end=end,
         window_days=window_days,
     )
+    return cast(GenerateDashboardInsightsResult, result)
 
 
 @mcp.tool(name="analyze_dashboard_history")
@@ -261,7 +385,7 @@ def tool_analyze_dashboard_history(
     ctx: Context,
     limit: int = 6,
     metrics: Optional[list[str]] = None,
-) -> Dict[str, Any]:
+) -> AnalyzeDashboardHistoryResult:
     """对比近几期摘要，分析关键指标趋势。
 
     Args:
@@ -273,11 +397,12 @@ def tool_analyze_dashboard_history(
         Dict[str, Any]: 含有趋势分析与时间序列数据的结果字典。
     """
 
-    return _analyze_dashboard_history(
+    result = _analyze_dashboard_history(
         _service(ctx),
         limit=limit,
         metrics=metrics,
     )
+    return cast(AnalyzeDashboardHistoryResult, result)
 
 
 @mcp.tool(name="export_dashboard_history")
@@ -285,7 +410,7 @@ def tool_export_dashboard_history(
     ctx: Context,
     limit: int,
     path: str,
-) -> Dict[str, Any]:
+) -> ExportDashboardHistoryResult:
     """将摘要历史导出为 CSV 文件。
 
     Args:
@@ -297,11 +422,12 @@ def tool_export_dashboard_history(
         Dict[str, Any]: 包含导出状态与文件路径的反馈信息。
     """
 
-    return _export_dashboard_history(
+    result = _export_dashboard_history(
         _service(ctx),
         limit=limit,
         path=path,
     )
+    return cast(ExportDashboardHistoryResult, result)
 
 
 @mcp.tool(name="amazon_bestseller_search")
@@ -311,7 +437,7 @@ def tool_amazon_bestseller_search(
     search_index: str,
     browse_node_id: Optional[str] = None,
     max_items: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> AmazonBestsellerSearchResult:
     """调用 PAAPI，查询指定类目的热销商品。
 
     Args:
@@ -325,13 +451,14 @@ def tool_amazon_bestseller_search(
         Dict[str, Any]: 包含热销商品列表及摘要信息的字典。
     """
 
-    return _amazon_bestseller_search(
+    result = _amazon_bestseller_search(
         _service(ctx),
         category=category,
         search_index=search_index,
         browse_node_id=browse_node_id,
         max_items=max_items,
     )
+    return cast(AmazonBestsellerSearchResult, result)
 
 
 @mcp.tool(name="compute_dashboard_metrics")
@@ -343,7 +470,7 @@ def tool_compute_dashboard_metrics(
     sales: list[Dict[str, Any]],
     traffic: list[Dict[str, Any]],
     top_n: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> ComputeDashboardMetricsResult:
     """根据原始数据计算 KPI 并持久化摘要结果。
 
     Args:
@@ -359,7 +486,7 @@ def tool_compute_dashboard_metrics(
         Dict[str, Any]: 计算后的 KPI 摘要信息。
     """
 
-    return _compute_dashboard_metrics(
+    result = _compute_dashboard_metrics(
         _service(ctx),
         start=start,
         end=end,
@@ -368,6 +495,7 @@ def tool_compute_dashboard_metrics(
         traffic=traffic,
         top_n=top_n,
     )
+    return cast(ComputeDashboardMetricsResult, result)
 
 
 def main(argv: Optional[list[str]] = None) -> None:
