@@ -98,15 +98,15 @@ def build_operations_agent(
         top_n: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            ��ȡָ��ʱ�䴰���ڵ�ԭʼ�������������ݡ�
-        ����:
-            start (Optional[str]): ISO ��ʽ�Ŀ�ʼ�����ַ�������Ϊ�ձ�ʾ�Զ����㡣
-            end (Optional[str]): ISO ��ʽ�Ľ��������ַ������� `start` ����ʹ�á�
-            window_days (Optional[int]): ��δ�ṩ `start`/`end` ʱ�Ĺ�������������
-            top_n (Optional[int]): ��Ҫ�۽�����Ʒ�������������ƽ����ģ��
-        ����:
-            Dict[str, Any]: �����������������ֶεĽṹ�����ݡ�
+        函数说明:
+            调用服务层拉取指定时间窗口内的销售和流量原始数据。
+        参数:
+            start (Optional[str]): ISO 8601 起始时间，默认使用配置中的最近窗口。
+            end (Optional[str]): ISO 8601 结束时间，缺省时根据 `start` 推导。
+            window_days (Optional[int]): 当未提供时间范围时使用的天数跨度。
+            top_n (Optional[int]): 仅返回排名前 N 的商品记录。
+        返回:
+            Dict[str, Any]: 包含销售、流量及衍生字段的原始数据载荷。
         """
         if USE_MCP_BRIDGE:
             remote = _call_mcp_bridge(
@@ -142,18 +142,18 @@ def build_operations_agent(
         window_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            ����ָ��ʱ�䴰���ڵ� KPI����ȱ�����ۻ��������ݻ��Զ����� `fetch_dashboard_data` ���롣
-        ����:
-            start (str): ָ�����Ŀ�ʼ���ڣ�ISO ��ʽ��
-            end (str): ָ�����Ľ������ڣ�ISO ��ʽ��
-            source (str): ������Դ��ʶ������ժҪ˵����
-            sales (Optional[List[Dict[str, Any]]]): ���������б������� None ʱ�Զ���ȡ��
-            traffic (Optional[List[Dict[str, Any]]]): ���������б������� None ʱ�Զ���ȡ��
-            top_n (Optional[int]): �ص���Ʒ������Ĭ��ʹ������ֵ��
-            window_days (Optional[int]): �� start/end ȱʧʱʹ�õĹ�������������
-        ����:
-            Dict[str, Any]: ���� `summary` ���Ľṹ��ָ������
+        函数说明:
+            基于销售与流量数据计算 KPI，可复用 `fetch_dashboard_data` 的输出。
+        参数:
+            start (str): 统计区间起始时间（ISO 8601）。
+            end (str): 统计区间结束时间（ISO 8601）。
+            source (str): 数据来源标识，例如 `amazon_paapi`。
+            sales (Optional[List[Dict[str, Any]]]): 可选的销售数据数组，缺省时由服务层补全。
+            traffic (Optional[List[Dict[str, Any]]]): 可选的流量数据数组，缺省时由服务层补全。
+            top_n (Optional[int]): 指定仅保留排名前 N 的指标。
+            window_days (Optional[int]): 仅提供起止时间之一时使用的默认跨度。
+        返回:
+            Dict[str, Any]: 计算后的指标摘要与中间数据。
         """
         data: Dict[str, Any] | None = None
         if sales is None or traffic is None:
@@ -183,7 +183,7 @@ def build_operations_agent(
             end = (data.get("end") if data else None) or end
             source = (data.get("source") if data else None) or source or context.config.dashboard.marketplace
             if sales is None or traffic is None:
-                raise RuntimeError("�޷���ȡ���ۻ��������ݣ��޷�����ָ�ꡣ")
+                raise RuntimeError("compute_dashboard_metrics 需要销售或流量数据，无法继续计算")
 
         payload = {
             "start": start,
@@ -218,17 +218,17 @@ def build_operations_agent(
         top_n: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            ������Ӫ���죻�� `summary` ȱʧʱ���Զ��ȼ��� KPI ժҪ��
-        ����:
-            summary (Optional[Dict[str, Any]]): ָ��ժҪ��ȱʧʱ�ɺ����ڲ����㡣
-            focus (Optional[str]): �����ص㣬���� 'sales'��
-            start (Optional[str]): ���¼���ָ��ʱʹ�õĿ�ʼ���ڡ�
-            end (Optional[str]): ���¼���ָ��ʱʹ�õĽ������ڡ�
-            window_days (Optional[int]): ���¼���ʱ�Ĺ�������������
-            top_n (Optional[int]): ָ�����ʱ���ص���Ʒ������
-        ����:
-            Dict[str, Any]: ���������ı���ժҪ��Ϣ�Ľṹ�������
+        函数说明:
+            根据指标摘要生成洞见报告，可在缺省时自动拉取并计算指标。
+        参数:
+            summary (Optional[Dict[str, Any]]): 已计算好的指标摘要。
+            focus (Optional[str]): 洞见关注的重点，例如 `sales`。
+            start (Optional[str]): 指定自动取数的起始时间。
+            end (Optional[str]): 指定自动取数的结束时间。
+            window_days (Optional[int]): 自动取数时的窗口跨度。
+            top_n (Optional[int]): 需要分析的排行榜 Top N。
+        返回:
+            Dict[str, Any]: 包含洞见文本及辅助数据的结果。
         """
         working_summary = summary
         if working_summary is None:
@@ -278,7 +278,7 @@ def build_operations_agent(
                 )
             working_summary = metrics_result.get("summary") if isinstance(metrics_result, dict) else None
             if working_summary is None:
-                raise RuntimeError("�޷���ȡָ��ժҪ���޷����ɶ��졣")
+                raise RuntimeError("无法从指标结果中提取 summary 字段")
 
         payload: Dict[str, Any] = {"summary": working_summary}
         if focus is not None:
@@ -296,13 +296,13 @@ def build_operations_agent(
         metrics: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            �������ָ��ժҪ������ԱȲ�����������ʱ�����С�
-        ����:
-            limit (int): ����Ƚϵ���ʷժҪ������
-            metrics (Optional[List[str]]): ��Ҫ��ע��ָ���б���Ϊ��ʱ����ȫ��ָ�ꡣ
-        ����:
-            Dict[str, Any]: �����Աȷ�����ʱ���������ݡ�
+        函数说明:
+            汇总历史仪表盘数据，生成时间序列趋势或异常分析。
+        参数:
+            limit (int): 本次分析包含的历史期数。
+            metrics (Optional[List[str]]): 需要重点关注的指标列表。
+        返回:
+            Dict[str, Any]: 历史趋势与分析结论。
         """
         payload: Dict[str, Any] = {"limit": limit, "metrics": metrics}
         if USE_MCP_BRIDGE:
@@ -318,13 +318,13 @@ def build_operations_agent(
         path: str,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            �������ָ��ժҪ����Ϊ CSV �ļ���
-        ����:
-            limit (int): ��������ʷ��¼������
-            path (str): CSV ���·�������������·����
-        ����:
-            Dict[str, Any]: ��������״̬���ļ�·���ķ�����Ϣ��
+        函数说明:
+            导出历史仪表盘数据并保存为 CSV 文件。
+        参数:
+            limit (int): 导出的历史期数上限。
+            path (str): CSV 文件的输出路径。
+        返回:
+            Dict[str, Any]: 导出结果与文件信息。
         """
         payload = {"limit": limit, "path": path}
         if USE_MCP_BRIDGE:
@@ -343,15 +343,15 @@ def build_operations_agent(
         max_items: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        ����˵��:
-            ��ѯ����ѷָ����Ŀ�µĳ�������Ϣ��
-        ����:
-            category (str): �ڲ�ʹ�õķ������ƻ������
-            search_index (str): Amazon PAAPI ������������ `Toys`��`Books` �ȡ�
-            browse_node_id (Optional[str]): ָ���Ľڵ��ţ�ϸ��������Ŀ��
-            max_items (Optional[int]): ��෵�ص���Ʒ������
-        ����:
-            Dict[str, Any]: ������Ʒ�б�����������������ժҪ��Ϣ��
+        函数说明:
+            查询 Amazon PAAPI 热销榜单，获取指定分类的热门商品。
+        参数:
+            category (str): 自定义的业务分类名称。
+            search_index (str): Amazon PAAPI 搜索索引，例如 `Toys` 或 `Books`。
+            browse_node_id (Optional[str]): 对应的类目节点 ID。
+            max_items (Optional[int]): 限制返回的商品数量。
+        返回:
+            Dict[str, Any]: 热销商品列表与相关元数据。
         """
         payload = {
             "category": category,

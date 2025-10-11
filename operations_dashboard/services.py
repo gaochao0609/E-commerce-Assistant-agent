@@ -59,18 +59,16 @@ def create_service_context(
     repository: Optional[SQLiteRepository] = None,
     llm: Optional[ChatOpenAI] = None,
 ) -> ServiceContext:
-    """
-    Build the service context shared by MCP tools and the LangGraph agent.
+    """构建 MCP 工具与 LangGraph Agent 所共享的业务上下文。
 
-    Args:
-        config: Application configuration containing marketplace, storage, and credential settings.
-        data_source: Optional sales data provider. Defaults to the built-in mock source when omitted.
-        repository: Optional SQLite repository instance. If storage is enabled and no repository is supplied,
-            a new SQLiteRepository is created automatically.
-        llm: Optional ChatOpenAI instance used to generate natural-language insights.
+    参数:
+        config: 应用配置，包含市场、存储及凭证信息。
+        data_source: 可选的销量数据提供方，未传入时使用内置的 Mock 数据源。
+        repository: 可选的 SQLite 仓储实例；当开启持久化且未传入时会自动创建。
+        llm: 可选的 ChatOpenAI 实例，用于生成自然语言洞察。
 
-    Returns:
-        ServiceContext: Aggregated dependencies including config, data source, repository, and LLM.
+    返回:
+        ServiceContext: 汇聚配置、数据源、仓储与 LLM 的上下文对象。
     """
     data_source = data_source or create_default_mock_source(config)
     if repository is None and config.storage.enabled:
