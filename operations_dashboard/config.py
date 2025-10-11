@@ -128,6 +128,7 @@ class AppConfig:
     amazon: AmazonCredentialConfig
     dashboard: DashboardConfig
     storage: StorageConfig
+    openai_api_key: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -141,4 +142,5 @@ class AppConfig:
             amazon=AmazonCredentialConfig.from_env(),
             dashboard=DashboardConfig.from_env(),
             storage=StorageConfig.from_env(),
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
         )

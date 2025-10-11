@@ -35,10 +35,6 @@ from operations_dashboard.config import (
     DashboardConfig,
     StorageConfig,
 )
-from operations_dashboard.services import (
-    create_service_context,
-    generate_dashboard_insights,
-)
 import operations_dashboard.mcp_bridge as mcp_bridge
 from operations_dashboard.mcp_bridge import _server_parameters, call_mcp_tool
 
@@ -47,28 +43,6 @@ def _assert_keys(payload: Dict[str, Any], expected: Iterable[str]) -> None:
     missing = [key for key in expected if key not in payload]
     if missing:
         raise AssertionError(f"缺失字段: {missing}, payload={payload}")
-
-
-def _generate_dashboard_insights_local(  # pragma: no cover - 仅用于回退路径
-    summary_payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    dummy_context = create_service_context(
-        AppConfig(
-            amazon=AmazonCredentialConfig(
-                access_key="mock",
-                secret_key="mock",
-                associate_tag=None,
-                marketplace="US",
-            ),
-            dashboard=DashboardConfig(),
-            storage=StorageConfig(enabled=False),
-        ),
-        llm=None,
-    )
-    return generate_dashboard_insights(
-        dummy_context,
-        summary=summary_payload,
-    )
 
 
 async def _probe_stdio_once() -> Tuple[int, int, int]:
@@ -178,19 +152,13 @@ def _exercise_tools_with_storage() -> None:
                 )
                 _assert_keys(insights_result, ("report",))
             except RuntimeError as exc:
-                print(
-                    f"[warn] generate_dashboard_insights 通过 MCP 调用失败，将改用本地实现：{exc}"
-                )
-                insights_result = _generate_dashboard_insights_local(
-                    summary_result["summary"]
-                )
-            except Exception as exc:  # pragma: no cover - 意外错误
-                print(
-                    f"[warn] generate_dashboard_insights 通过 MCP 调用出现异常，将改用本地实现：{exc}"
-                )
-                insights_result = _generate_dashboard_insights_local(
-                    summary_result["summary"]
-                )
+                raise AssertionError(
+                    "generate_dashboard_insights via MCP failed; local fallback is disabled - fix the MCP server and rerun."
+                ) from exc
+            except Exception as exc:  # pragma: no cover - unexpected failure
+                raise AssertionError(
+                    "generate_dashboard_insights via MCP raised an unexpected error; local fallback is disabled - inspect the MCP server."
+                ) from exc
 
             analysis_result = call_mcp_tool(
                 "analyze_dashboard_history",
@@ -355,6 +323,7 @@ def _run_agent_roundtrip() -> None:
             top_n_products=5,
         ),
         storage=StorageConfig(enabled=False),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
     )
     result = run_agent_demo(
         config, "Generate the latest daily operations report with key insights."

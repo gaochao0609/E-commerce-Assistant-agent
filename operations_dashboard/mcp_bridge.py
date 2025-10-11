@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from typing import Any, Dict, Optional
 
 from mcp import ClientSession, StdioServerParameters
@@ -12,7 +13,7 @@ from mcp.client.stdio import stdio_client
 from mcp.types import EmbeddedResource, TextContent
 
 # 默认用于启动 MCP 服务器的可执行命令，可通过环境变量覆盖。
-DEFAULT_COMMAND = os.getenv("MCP_BRIDGE_COMMAND", "python")
+DEFAULT_COMMAND = os.getenv("MCP_BRIDGE_COMMAND", sys.executable)
 # 以 JSON 数组形式存储的命令行参数，默认执行 `python -m operations_dashboard.mcp_server`。
 DEFAULT_ARGS = os.getenv(
     "MCP_BRIDGE_ARGS",
@@ -71,14 +72,11 @@ def _server_parameters() -> StdioServerParameters:
 
     command = DEFAULT_COMMAND
     args = _parse_args(DEFAULT_ARGS)
+    base_env = dict(os.environ)
     overrides = _parse_env(DEFAULT_ENV)
-    env: Optional[Dict[str, str]]
-    if overrides is None:
-        env = None
-    else:
-        base_env = dict(os.environ)
+    if overrides:
         base_env.update(overrides)
-        env = base_env
+    env: Dict[str, str] = base_env
     return StdioServerParameters(command=command, args=args, env=env)
 
 

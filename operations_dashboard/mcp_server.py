@@ -1,6 +1,7 @@
 """Operations Dashboard MCP 服务模块，基于 FastMCP 暴露业务资源与工具。"""
 
 import argparse
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, cast
@@ -177,6 +178,7 @@ def _load_config() -> AppConfig:
             ),
             dashboard=DashboardConfig(),
             storage=StorageConfig(),
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
         )
 
 

@@ -1,82 +1,82 @@
-# Operations Dashboard MCP
+﻿# Operations Dashboard MCP
 
-面向 Amazon 运营分析场景的 Model Context Protocol (MCP) 服务端与 LangGraph Agent 示例。项目提供统一的资源、工具接口，可作为 MCP 服务对外暴露，也支持本地脚本联调与验证。
+Model Context Protocol (MCP) server and LangGraph agent for Amazon operations analytics. The project exposes unified resources and tool interfaces, supports MCP clients, and can also be exercised locally for debugging.
 
-## 环境准备
+## Environment Setup
 
-- Python 3.10 及以上版本
-- 推荐创建虚拟环境并激活：
-  ```bash
-  python -m venv .venv
-  .\.venv\Scripts\activate               # Windows PowerShell
-  pip install -r requirements.txt
-  ```
-- 可选外部凭证：
+1. Install Python 3.10 or newer.
+2. Create and activate a virtual environment:
+   `ash
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   pip install -r requirements.txt
+   `
+3. If you previously installed older versions of LangChain packages, upgrade them to ensure GPT-5 compatibility:
+   `ash
+   python -m pip install --upgrade langchain langchain-openai
+   `
+4. Optional environment variables:
 
-| 变量 | 说明 |
+| Variable | Description |
 | --- | --- |
-| `OPENAI_API_KEY` | 用于生成运营洞察的 OpenAI 密钥。缺失时会返回占位文字。 |
-| `AMAZON_ACCESS_KEY` / `AMAZON_SECRET_KEY` / `AMAZON_ASSOCIATE_TAG` / `AMAZON_MARKETPLACE` | Amazon PAAPI 凭证，`amazon_bestseller_search` 工具依赖。缺失时会提示未配置。 |
+| OPENAI_API_KEY | Required to generate insights via OpenAI; without it only placeholder text is returned. |
+| AMAZON_ACCESS_KEY / AMAZON_SECRET_KEY / AMAZON_ASSOCIATE_TAG / AMAZON_MARKETPLACE | Amazon PAAPI credentials required by the mazon_bestseller_search tool. |
 
-## 运行 MCP 服务器
+## Running the MCP Server
 
-```bash
-# stdio 传输（默认模式）
+`ash
+# stdio transport (default)
 python -m operations_dashboard.mcp_server
 
-# Streamable HTTP 传输（便于 MCP Inspector 等客户端）
+# Streamable HTTP transport (for MCP Inspector, etc.)
 python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --port 8000
-```
+`
 
-可选环境变量：
+Optional environment variables:
 
-- `USE_MCP_BRIDGE`：设为 `1/true/yes` 时，LangGraph Agent 会通过 MCP 桥访问远程工具。
-- `MCP_BRIDGE_COMMAND` / `MCP_BRIDGE_ARGS` / `MCP_BRIDGE_ENV`：自定义 MCP 子进程的启动方式与环境变量，脚本默认已合并系统环境，避免覆盖 `OPENAI_API_KEY` 等配置。
+- USE_MCP_BRIDGE: set to 1/true/yes to make the LangGraph agent call tools via MCP.
+- MCP_BRIDGE_COMMAND / MCP_BRIDGE_ARGS / MCP_BRIDGE_ENV: customize how the MCP child process is launched and which environment variables are passed to it.
 
-## 自检与调试
+## Self-check & Debugging Scripts
 
-| 脚本 | 说明 |
-| --- | --- |
-| `python operations_dashboard/test.py` | 串行验证 stdio 通路、工具调用、LangGraph Agent 回路以及 HTTP 监听（最后一步会尝试临时拉起 HTTP 服务器）。 |
-| `python operations_dashboard/call_insights_tool.py` | 最小化脚本，直接通过 MCP 调用 `fetch_dashboard_data` → `generate_dashboard_insights`，便于查看结构化返回和错误信息。 |
-| `python operations_dashboard/verify_openai_key.py` | 检查 `OPENAI_API_KEY` 是否可用。网络受限环境可能需要代理。 |
+- python operations_dashboard/test.py – sequentially verifies stdio transport, tool invocations, the LangGraph agent loop, and a temporary HTTP listener. If you only care about stdio/tools, comment out the HTTP section near the end of the script.
+- python operations_dashboard/call_insights_tool.py – minimal script that calls both etch_dashboard_data and generate_dashboard_insights via MCP and prints the structured responses.
+- python operations_dashboard/verify_openai_key.py – validates whether OPENAI_API_KEY works (a proxy may be required on restricted networks).
 
-> 若仅关注 stdio/工具验证，可临时注释 `test.py` 末尾的 HTTP 检查段，以避免等待临时 HTTP 服务器启动。
+## LangGraph Agent
 
-## LangGraph Agent 协同
+- gent.py builds a LangGraph-based operations consultant agent. It can run locally or forward calls through the MCP bridge.
+- The bridge launches python -m operations_dashboard.mcp_server by default; adjust MCP_BRIDGE_COMMAND, MCP_BRIDGE_ARGS, or MCP_BRIDGE_ENV if you need a different command or environment.
+- When USE_MCP_BRIDGE is disabled, the agent directly invokes the local service implementations.
 
-- `agent.py` 构建了一个基于 LangGraph 的运营顾问 Agent，可直接调用，也可通过 MCP 桥转发到远端工具。
-- MCP 桥默认执行 `python -m operations_dashboard.mcp_server`。如需定制命令、参数或环境变量，可调整 `MCP_BRIDGE_COMMAND`、`MCP_BRIDGE_ARGS` 与 `MCP_BRIDGE_ENV`。
-- 当 `USE_MCP_BRIDGE` 关闭时，Agent 会直接调用本地服务实现。
+## Project Layout
 
-## 目录结构
-
-```
+`
 operations_dashboard/
-├── agent.py                 # LangGraph Agent 定义
-├── call_insights_tool.py    # MCP 工具调试脚本
-├── config.py                # 应用配置模型
-├── mcp_bridge.py            # MCP 桥（stdio 客户端封装）
-├── mcp_server.py            # FastMCP 服务端入口
-├── services.py              # 业务服务与工具实现
-├── test.py                  # 集成自检脚本
-├── verify_openai_key.py     # OpenAI Key 快速验证
-├── data_sources/            # 数据源接口及 Mock 实现
-├── metrics/                 # 指标计算逻辑
-├── reporting/               # 报表格式化工具
-├── storage/                 # SQLite 仓储实现
-└── utils/                   # 通用工具函数
-```
+├── agent.py
+├── call_insights_tool.py
+├── config.py
+├── mcp_bridge.py
+├── mcp_server.py
+├── services.py
+├── test.py
+├── verify_openai_key.py
+├── data_sources/
+├── metrics/
+├── reporting/
+├── storage/
+└── utils/
+`
 
-## 常见问题
+## Troubleshooting
 
-1. **`generate_dashboard_insights` 提示缺少 `OPENAI_API_KEY`**  
-   在启动 MCP 服务器或执行脚本的终端中检查 `echo $env:OPENAI_API_KEY`（PowerShell）或 `python -c "import os; print(os.getenv('OPENAI_API_KEY'))"`。如使用 MCP 桥，请确认 `MCP_BRIDGE_ENV` 中也包含该变量。
+1. **generate_dashboard_insights reports missing OPENAI_API_KEY** – check the variable in the current terminal (echo  on PowerShell or python -c "import os; print(os.getenv('OPENAI_API_KEY'))"). If you use the MCP bridge, ensure MCP_BRIDGE_ENV also carries the key.
+2. **generate_dashboard_insights raises “unhandled errors in a TaskGroup”** – upgrade LangChain packages: python -m pip install --upgrade langchain langchain-openai. Older versions do not fully support the GPT-5 API and surface this aggregated error inside MCP.
+3. **mazon_bestseller_search warns about missing credentials** – provide Amazon PAAPI credentials or ignore the warning when the tool is not needed.
+4. **HTTP connectivity check times out** – ensure uvicorn is installed, the port is free, and retry with another port (for example --port 8765).
 
-2. **`amazon_bestseller_search` 提示未配置凭证**  
-   填写 Amazon PAAPI 相关变量，或在未使用该工具时忽略告警。
+## Version Notes
 
-3. **HTTP 联通性检查超时**  
-   确认安装了 `uvicorn`，端口未被占用，必要时更换端口（例如 `--port 8765`）。
+- Starting in December 2024, running GPT-5 models requires langchain>=0.3.12 and langchain-openai>=0.3.3. Older versions surface the TaskGroup aggregate error shown above.
 
-[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/gaochao0609/E-commerce-Assistant-agent)
+[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logoColor=ffffff)](https://zread.ai/gaochao0609/E-commerce-Assistant-agent)

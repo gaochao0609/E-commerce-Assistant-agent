@@ -10,13 +10,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-try:
-    from langchain_openai import ChatOpenAI
-    from langchain_core.messages import HumanMessage, SystemMessage
-except ImportError:  # pragma: no cover - optional dependency
-    ChatOpenAI = None  # type: ignore[assignment]
-    HumanMessage = None  # type: ignore[assignment]
-    SystemMessage = None  # type: ignore[assignment]
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from .config import AppConfig
 from .data_sources.amazon_business_reports import create_default_mock_source
@@ -65,25 +60,30 @@ def create_service_context(
     llm: Optional[ChatOpenAI] = None,
 ) -> ServiceContext:
     """
-    功能说明:
-        基于应用配置构建服务上下文，自动注入数据源、仓库以及语言模型。
-    参数:
-        config (AppConfig): 应用层配置，包含市场与存储信息。
-        data_source (Optional[SalesDataSource]): 可选的数据源实现，未提供时使用默认 Mock。
-        repository (Optional[SQLiteRepository]): 可选的持久化仓库实例。
-        llm (Optional[ChatOpenAI]): 可选的语言模型实例，用于生成洞察。
-    返回:
-        ServiceContext: 已填充所有依赖的服务上下文。
+    Build the service context shared by MCP tools and the LangGraph agent.
+
+    Args:
+        config: Application configuration containing marketplace, storage, and credential settings.
+        data_source: Optional sales data provider. Defaults to the built-in mock source when omitted.
+        repository: Optional SQLite repository instance. If storage is enabled and no repository is supplied,
+            a new SQLiteRepository is created automatically.
+        llm: Optional ChatOpenAI instance used to generate natural-language insights.
+
+    Returns:
+        ServiceContext: Aggregated dependencies including config, data source, repository, and LLM.
     """
-    # 1. 优先使用外部注入的数据源，否则创建默认的本地模拟数据源。
     data_source = data_source or create_default_mock_source(config)
-    # 2. 如配置启用存储而外部未注入仓库，则自动创建 SQLite 仓库。
     if repository is None and config.storage.enabled:
         repository = SQLiteRepository(config.storage.db_path)
-    # 3. 在存在 OPENAI_API_KEY 时懒加载 LLM，便于后续生成洞察。
-    if llm is None and os.getenv("OPENAI_API_KEY") and ChatOpenAI is not None:
-        llm = ChatOpenAI(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-5-mini", temperature=0)
-    return ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
+    api_key = config.openai_api_key or os.getenv("OPENAI_API_KEY")
+    logger.debug("create_service_context key_present=%s ChatOpenAI=%s initial_llm=%s", bool(api_key), ChatOpenAI, llm)
+    if ChatOpenAI is None:
+        raise RuntimeError("ChatOpenAI import returned None. Check langchain-openai installation.")
+    if llm is None and api_key:
+        llm = ChatOpenAI(api_key=api_key, model="gpt-5-mini", temperature=0)
+    context = ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
+    logger.debug("create_service_context returning llm=%s", context.llm)
+    return context
 
 
 def _extract_items(search_result: object) -> Sequence:
@@ -366,6 +366,7 @@ def generate_dashboard_insights(
     window_days: Optional[int] = None,
     top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
+    logger.debug("generate_dashboard_insights context.llm=%s", context.llm)
     """
     功能说明:
         调用配置好的 LLM 依据 KPI 摘要生成结构化洞察。
@@ -411,35 +412,19 @@ def generate_dashboard_insights(
         }
 
     if context.llm is None:
-        return {
-            "report": {
-                "summary": working_summary,
-                "insights": "OPENAI_API_KEY 未配置，返回占位洞察，请检查模型配置。",
-                "placeholder": True,
-            }
-        }
+        raise RuntimeError("LLM missing from service context")
     instructions = (
         "请以资深运营顾问身份，依据提供的数据生成结构化洞察。"
         "优先关注“销量趋势、流量变化、转化率、退款”这些主题。"
     )
     if focus:
         instructions += f" 特别关注 {focus}。"
-    try:
-        response = context.llm.invoke(
-            [
-                SystemMessage(content=instructions),
-                HumanMessage(content=f"请分析下面的 JSON 数据：{working_summary}"),
-            ]
-        )
-    except Exception as exc:  # pragma: no cover
-        logger.warning("LLM 调用失败，返回占位结果: %s", exc)
-        return {
-            "report": {
-                "summary": working_summary,
-                "insights": "暂时无法调用 LLM 生成洞察。",
-                "placeholder": True,
-            }
-        }
+    response = context.llm.invoke(
+        [
+            SystemMessage(content=instructions),
+            HumanMessage(content=f"请分析下面的 JSON 数据：{working_summary}"),
+        ]
+    )
     return {"report": {"summary": working_summary, "insights": response.content}}
 
 def analyze_dashboard_history(

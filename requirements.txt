@@ -1,6 +1,6 @@
-﻿langchain
-langchain-openai
-langgraph
-mcp[cli]
-python-amazon-paapi
-typing_extensions
+﻿langchain>=0.3.12
+langchain-openai>=0.3.3
+langgraph>=0.2.39
+mcp[cli]>=1.15.0
+python-amazon-paapi>=5.0.0
+typing_extensions>=4.12.2

@@ -1,5 +1,6 @@
-# call_insights_tool.py
+﻿# call_insights_tool.py
 import os
+import sys
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 from mcp import StdioServerParameters
@@ -7,14 +8,14 @@ import asyncio
 
 async def main() -> None:
     params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["-m", "operations_dashboard.mcp_server", "stdio"],
-        env=None,  # 传递当前 shell 的环境变量
+        env={"OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", "")},
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            # 先跑一下 fetch，取出 start/end
+            # 鍏堣窇涓€涓?fetch锛屽彇鍑?start/end
             data = await session.call_tool("fetch_dashboard_data", {"window_days": 7})
             print("fetch result structured:", data.structuredContent)
             payload = {
