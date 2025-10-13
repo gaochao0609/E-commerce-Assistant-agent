@@ -1,9 +1,11 @@
-"""Operations Dashboard MCP 服务模块，基于 FastMCP 暴露业务资源与工具。"""
+﻿"""Operations Dashboard MCP 服务模块，基于 FastMCP 暴露业务资源与工具。"""
 
 import argparse
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import MethodType
 from typing import Any, Dict, List, Optional, cast
 
 from typing_extensions import TypedDict
@@ -28,7 +30,13 @@ from operations_dashboard.services import (
     generate_dashboard_insights as _generate_dashboard_insights,
 )
 from operations_dashboard.storage.repository import StoredSummary
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import Response
+from starlette.routing import Route
 
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=os.getenv('MCP_SERVER_LOG_LEVEL', 'INFO').upper(), format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 
 GLOBAL_SERVICE_CONTEXT: Optional[ServiceContext] = None
 
@@ -206,6 +214,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DashboardAppContext]:
         pass
 
 
+
 mcp = FastMCP(
     name="Operations Dashboard",
     instructions=(
@@ -213,7 +222,51 @@ mcp = FastMCP(
         "Use the registered tools to fetch raw data, compute KPIs, and analyze trends."
     ),
     lifespan=app_lifespan,
+    streamable_http_path="/mcp",
 )
+
+_original_streamable_http_app = mcp.streamable_http_app
+
+
+def _streamable_http_app_with_cors(self: FastMCP):
+    app = _original_streamable_http_app()
+
+    async def _handle_options(request):
+        requested_headers = request.headers.get("Access-Control-Request-Headers", "")
+        allow_headers = requested_headers or "*"
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": allow_headers,
+                "Access-Control-Max-Age": "600",
+            },
+        )
+
+    app.router.routes.insert(
+        0,
+        Route(
+            self.settings.streamable_http_path,
+            _handle_options,
+            methods=["OPTIONS"],
+        ),
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["MCP-Session-Id"],
+    )
+    return app
+
+
+mcp.streamable_http_app = MethodType(_streamable_http_app_with_cors, mcp)
+
+
+
+
 # Inspector 会读取该列表自动安装调试所需的三方依赖。
 mcp.dependencies = [
     "langchain",
@@ -531,6 +584,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         help="Optional port binding for HTTP-based transports.",
     )
     args = parser.parse_args(argv)
+
+    logger.info("Starting MCP server transport=%s host=%s port=%s streamable_http_path=%s",
+                args.transport, args.host or mcp.settings.host, args.port if args.port is not None else mcp.settings.port, getattr(mcp.settings, 'streamable_http_path', '(default)'))
 
     if args.host:
         mcp.settings.host = args.host
