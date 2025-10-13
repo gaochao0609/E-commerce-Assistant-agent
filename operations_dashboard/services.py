@@ -492,7 +492,17 @@ def export_dashboard_history(
     limit: int,
     path: str,
 ) -> Dict[str, Any]:
-    """Export recent dashboard summaries to CSV inside a trusted directory."""
+    """
+    功能说明:
+        导出指定数量的历史汇总记录到 CSV 文件。
+    参数:
+        context (ServiceContext): 服务上下文，需包含仓库实例。
+        limit (int): 导出的记录数量。
+        path (str): CSV 输出路径，可为相对路径。
+    返回:
+        Dict[str, Any]: 包含导出结果描述的字典。
+    """
+
     if not context.repository:
         return {"message": "未启用数据库持久化，无法导出历史数据。"}
 
