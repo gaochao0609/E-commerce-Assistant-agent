@@ -333,7 +333,7 @@ def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
     }
 
 
-@mcp.resource("operations-dashboard://config")
+@mcp.resource("operations-dashboard://config", mime_type="application/json")
 def read_configuration(ctx: Context) -> Dict[str, Any]:
     """返回当前仪表盘配置，供客户端参考默认参数。
 
@@ -355,7 +355,7 @@ def read_configuration(ctx: Context) -> Dict[str, Any]:
     }
 
 
-@mcp.resource("operations-dashboard://history/{limit}")
+@mcp.resource("operations-dashboard://history/{limit}", mime_type="application/json")
 def read_recent_history(
     ctx: Context,
     limit: int = 5,
@@ -524,8 +524,8 @@ def tool_compute_dashboard_metrics(
     start: str,
     end: str,
     source: str,
-    sales: list[Dict[str, Any]],
-    traffic: list[Dict[str, Any]],
+    sales: List[SalesRecordPayload],
+    traffic: List[TrafficRecordPayload],
     top_n: Optional[int] = None,
 ) -> ComputeDashboardMetricsResult:
     """根据原始数据计算 KPI 并持久化摘要结果。

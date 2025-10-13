@@ -492,26 +492,33 @@ def export_dashboard_history(
     limit: int,
     path: str,
 ) -> Dict[str, Any]:
-    """
-    功能说明:
-        导出指定数量的历史汇总记录到 CSV 文件。
-    参数:
-        context (ServiceContext): 服务上下文，需包含仓库实例。
-        limit (int): 导出的记录数量。
-        path (str): CSV 输出路径，可为相对路径。
-    返回:
-        Dict[str, Any]: 包含导出结果描述的字典。
-    """
+    """Export recent dashboard summaries to CSV inside a trusted directory."""
     if not context.repository:
         return {"message": "未启用数据库持久化，无法导出历史数据。"}
+
     context.repository.initialize()
     summaries = context.repository.fetch_recent_summaries(limit=limit)
     if not summaries:
-        return {"message": "数据库暂无可导出的历史记录。"}
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    # 写入 CSV 表头及逐条记录，采用 UTF-8 以兼容中文。
-    with output_path.open("w", newline="", encoding="utf-8") as csvfile:
+        return {"message": "数据库中暂无可导出的历史记录。"}
+
+    storage_root = Path(context.config.storage.db_path).resolve().parent
+    export_root = (storage_root / "exports").resolve()
+    export_root.mkdir(parents=True, exist_ok=True)
+
+    requested_path = Path(path)
+    candidate_path = (
+        (export_root / requested_path).resolve()
+        if not requested_path.is_absolute()
+        else requested_path.resolve()
+    )
+    try:
+        candidate_path.relative_to(export_root)
+    except ValueError:
+        return {"message": f"导出路径必须位于受信任目录 {export_root} 内部"}
+
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with candidate_path.open("w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(
             [
@@ -540,7 +547,8 @@ def export_dashboard_history(
                     item.created_at,
                 ]
             )
-    return {"message": f"历史数据已导出到 {output_path}"}
+
+    return {"message": f"历史数据已写入 {candidate_path}"}
 
 
 def amazon_bestseller_search(
