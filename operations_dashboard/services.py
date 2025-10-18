@@ -23,6 +23,11 @@ from .utils.dates import recent_period
 
 logger = logging.getLogger(__name__)
 
+PACKAGE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_ROOT.parent
+TRUSTED_DIRECTORIES_ROOT = (PROJECT_ROOT / "trusted_directories").resolve()
+TRUSTED_EXPORT_ROOT = (TRUSTED_DIRECTORIES_ROOT / "exports").resolve()
+
 PAAPI_RESOURCES: List[str] = [
     "ItemInfo.Title",
     "BrowseNodeInfo.BrowseNodes",
@@ -32,6 +37,32 @@ PAAPI_RESOURCES: List[str] = [
 # Amazon PAAPI 搜索请求所需的资源字段，确保返回标题、节点链路与销量排名。
 MAX_ITEMS_PER_REQUEST = 10
 # 控制单次畅销榜请求的最大商品数量，避免违反 PAAPI 速率限制。
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """Return True if path is within the given root (inclusive)."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _sanitize_export_subpath(raw_path: Path) -> Path:
+    """Convert a user supplied export path into a safe relative path."""
+    if raw_path.is_absolute():
+        try:
+            relative = raw_path.relative_to(raw_path.anchor)
+        except ValueError:
+            relative = Path(raw_path.name)
+    else:
+        relative = raw_path
+    safe_parts = [
+        part for part in relative.parts if part not in {"", ".", ".."}
+    ]
+    if not safe_parts:
+        return Path("history.csv")
+    return Path(*safe_parts)
 
 
 @dataclass
@@ -511,20 +542,18 @@ def export_dashboard_history(
     if not summaries:
         return {"message": "数据库中暂无可导出的历史记录。"}
 
-    storage_root = Path(context.config.storage.db_path).resolve().parent
-    export_root = (storage_root / "exports").resolve()
-    export_root.mkdir(parents=True, exist_ok=True)
+    TRUSTED_EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
 
-    requested_path = Path(path)
-    candidate_path = (
-        (export_root / requested_path).resolve()
-        if not requested_path.is_absolute()
-        else requested_path.resolve()
-    )
-    try:
-        candidate_path.relative_to(export_root)
-    except ValueError:
-        return {"message": f"导出路径必须位于受信任目录 {export_root} 内部"}
+    sanitized_subpath = _sanitize_export_subpath(Path(path))
+    candidate_path = (TRUSTED_EXPORT_ROOT / sanitized_subpath).resolve()
+
+    if not _is_within(candidate_path, TRUSTED_EXPORT_ROOT):
+        return {
+            "message": (
+                f"Export path {candidate_path} must stay within trusted directories: "
+                f"{TRUSTED_EXPORT_ROOT}"
+            )
+        }
 
     candidate_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -558,7 +587,13 @@ def export_dashboard_history(
                 ]
             )
 
-    return {"message": f"历史数据已写入 {candidate_path}"}
+    relative_display = candidate_path.relative_to(TRUSTED_DIRECTORIES_ROOT)
+    return {
+        "message": (
+            f"Exported history CSV to {candidate_path} "
+            f"(trusted location: {relative_display})"
+        )
+    }
 
 
 def amazon_bestseller_search(

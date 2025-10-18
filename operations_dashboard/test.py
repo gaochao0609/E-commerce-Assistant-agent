@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, Iterable, Tuple
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -37,6 +38,7 @@ from operations_dashboard.config import (
 )
 import operations_dashboard.mcp_bridge as mcp_bridge
 from operations_dashboard.mcp_bridge import _server_parameters, call_mcp_tool
+from operations_dashboard.services import TRUSTED_DIRECTORIES_ROOT, TRUSTED_EXPORT_ROOT
 
 
 def _assert_keys(payload: Dict[str, Any], expected: Iterable[str]) -> None:
@@ -96,7 +98,9 @@ def _exercise_tools_with_storage() -> None:
     try:
         with TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "operations.sqlite3"
-            history_path = Path(tmpdir) / "history.csv"
+            export_filename = f"history_{uuid4().hex}.csv"
+            requested_export_path = export_filename
+            expected_export_path = (TRUSTED_EXPORT_ROOT / export_filename).resolve()
             os.environ["STORAGE_ENABLED"] = "1"
             os.environ["STORAGE_DB_PATH"] = str(db_path)
             os.environ["AMAZON_ACCESS_KEY"] = "mock"
@@ -173,18 +177,20 @@ def _exercise_tools_with_storage() -> None:
 
             export_result = call_mcp_tool(
                 "export_dashboard_history",
-                {"limit": 5, "path": str(history_path)},
+                {"limit": 5, "path": requested_export_path},
             )
             _assert_keys(export_result, ("message",))
             export_message = export_result["message"]
-            if str(history_path) not in export_message:
+            if str(expected_export_path) not in export_message:
                 raise AssertionError(
                     f"导出返回信息未包含目标路径：{export_message}"
                 )
-            if not history_path.exists():
+            if not expected_export_path.exists():
                 print(
-                    f"[warn] 历史 CSV 文件暂未生成，本地路径：{history_path}，继续执行后续流程"
+                    f"[warn] 历史 CSV 文件暂未生成，本地路径：{expected_export_path}，继续执行后续流程"
                 )
+            else:
+                expected_export_path.unlink(missing_ok=True)
     finally:
         if previous_enabled is None:
             os.environ.pop("STORAGE_ENABLED", None)
@@ -310,6 +316,8 @@ def _run_http_server(host: str = "127.0.0.1", port: int = 8765):
 
 
 def _run_agent_roundtrip() -> None:
+    storage_db_path = (TRUSTED_DIRECTORIES_ROOT / "data" / "operations_dashboard.sqlite3").resolve()
+    storage_db_path.parent.mkdir(parents=True, exist_ok=True)
     config = AppConfig(
         amazon=AmazonCredentialConfig(
             access_key="mock",
@@ -322,7 +330,7 @@ def _run_agent_roundtrip() -> None:
             refresh_window_days=7,
             top_n_products=5,
         ),
-        storage=StorageConfig(enabled=False),
+        storage=StorageConfig(enabled=True, db_path=str(storage_db_path)),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
     )
     result = run_agent_demo(

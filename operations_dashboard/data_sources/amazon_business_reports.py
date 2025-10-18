@@ -20,7 +20,7 @@ class MockDataSourceSettings:
         asin_list (List[str] | None): 需要生成的 ASIN 列表，None 表示使用默认样例。
     """
 
-    seed: int = 2024
+    seed: int = 4048
     asin_list: List[str] | None = None
 
 
