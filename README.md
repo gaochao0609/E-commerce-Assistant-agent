@@ -75,7 +75,7 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 
 - `python operations_dashboard/test.py`：快速验证 stdio 管道与 LangGraph Agent 的基础流程。
 - `python operations_dashboard/call_insights_tool.py`：在命令行中依次调用 `fetch_dashboard_data` 与 `generate_dashboard_insights`，用于结构化联调。
-- `python operations_dashboard/verify_openai_key.py`：检查 `OPENAI_API_KEY` 是否可用。
+- `python operations_dashboard/verify_amazon_keys.py`：检查 Amazon PAAPI 凭证是否配置正确。
 
 ## LangGraph Agent 协同
 
@@ -94,7 +94,7 @@ operations_dashboard/
 ├── mcp_server.py             # FastMCP 服务器
 ├── services.py               # 业务逻辑与工具实现
 ├── test.py                   # 集成测试脚本
-├── verify_openai_key.py      # OpenAI 密钥检测
+├── verify_amazon_keys.py     # Amazon 凭证检测
 ├── data_sources/             # 数据源定义与 Mock 实现
 ├── metrics/                  # 指标计算逻辑
 ├── reporting/                # 报告格式化
@@ -115,7 +115,7 @@ operations_dashboard/
 
 ## 版本兼容性
 
-- 截至 2024 年 12 月测试通过的组合：`python>=3.10`、`langchain>=0.3.12`、`langchain-openai>=0.3.3`、`mcp>=0.4`。
+- 截至 2024 年 12 月测试通过的组合：`python>=3.10`、`langchain>=0.3.12`、`langchain-openai>=0.3.3`、`langgraph>=0.2.39`、`mcp>=1.15.0`。
 - 近期 GPT-5 系列模型默认启用 TaskGroup 并行能力，如遇兼容性问题请关注上述版本更新。
 
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logoColor=ffffff)](https://zread.ai/gaochao0609/E-commerce-Assistant-agent)
