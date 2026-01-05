@@ -34,9 +34,11 @@ Operations Dashboard MCP 利用 Model Context Protocol (MCP) 和 LangGraph Agent
 | 变量 | 说明 |
 | --- | --- |
 | `OPENAI_API_KEY` | `generate_dashboard_insights` 工具使用的 OpenAI 密钥。 |
+| `OPENAI_MODEL` | 可选，覆盖默认模型（默认 `gpt-5-mini`）。 |
+| `OPENAI_TEMPERATURE` | 可选，控制生成温度（默认 `0`）。 |
 | `AMAZON_ACCESS_KEY` / `AMAZON_SECRET_KEY` / `AMAZON_ASSOCIATE_TAG` / `AMAZON_MARKETPLACE` | 使用 `amazon_bestseller_search` 时需要的 Amazon PAAPI 凭证。 |
 | `USE_MCP_BRIDGE` | 设为 `1`/`true`/`yes` 时，LangGraph Agent 会通过 MCP 桥接远程服务器。 |
-| `MCP_BRIDGE_COMMAND` / `MCP_BRIDGE_ARGS` / `MCP_BRIDGE_ENV` | 自定义 MCP 桥接子进程的命令、参数与环境变量。 |
+| `MCP_BRIDGE_COMMAND` / `MCP_BRIDGE_ARGS` / `MCP_BRIDGE_ENV` / `MCP_BRIDGE_TRANSPORT` / `MCP_BRIDGE_URL` | 自定义 MCP 桥接子进程的命令、参数、环境变量与传输方式。 |
 
 > 若通过 MCP Inspector 等客户端连接，请确保所需变量在启动服务器的终端会话中已正确导出。
 
@@ -92,22 +94,22 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 
 ## 目录结构
 
-```
+```text
 operations_dashboard/
-├── agent.py                  # LangGraph Agent 入口（纯远程 MCP 模式）
-├── call_insights_tool.py     # MCP 工具调试脚本
-├── config.py                 # 应用配置
-├── mcp_bridge.py             # MCP stdio 客户端封装
-├── mcp_server.py             # FastMCP 服务器（提供所有业务能力）
-├── services.py               # 业务逻辑实现（MCP 服务器端使用）
-├── test.py                   # 集成测试脚本
-├── verify_amazon_keys.py     # Amazon 凭证检测
-├── data_sources/             # 数据源定义与 Mock 实现
-├── metrics/                  # 指标计算逻辑
-├── reporting/                # 报告格式化（仅 summary_to_dict）
-├── skills/                   # Skill 抽象层（MCP 服务器端使用）
-├── storage/                  # SQLite 持久化实现
-└── utils/                    # 通用工具函数
+|-- agent.py                  # LangGraph Agent entry (MCP client)
+|-- call_insights_tool.py     # MCP tool debug script
+|-- config.py                 # App configuration
+|-- mcp_bridge.py             # MCP client bridge (stdio/streamable-http)
+|-- mcp_server.py             # FastMCP server (business tools)
+|-- services.py               # Service layer (server-side)
+|-- test.py                   # Integration tests
+|-- verify_amazon_keys.py     # Amazon credential check
+|-- data_sources/             # Data sources and mock data
+|-- metrics/                  # KPI calculations
+|-- reporting/                # Summary formatting
+|-- skills/                   # Skill layer (server-side)
+|-- storage/                  # SQLite persistence
+`-- utils/                    # Utilities
 ```
 
 ## 常见问题
