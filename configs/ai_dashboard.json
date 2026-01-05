@@ -1,0 +1,17 @@
+﻿{
+  "appName": "Operations AI Assistant",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "maxInputChars": 4000,
+  "maxFileSizeMb": 5,
+  "maxRows": 200,
+  "maxColumns": 20,
+  "reportFormat": "xlsx",
+  "chartType": "bar",
+  "allowedFileTypes": [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/csv"
+  ],
+  "systemPrompt": "You are an internal operations assistant. Provide concise answers. When data is available, summarize insights and reference tables, charts, and report availability."
+}
