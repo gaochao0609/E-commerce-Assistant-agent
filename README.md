@@ -76,7 +76,7 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 - `python operations_dashboard/test.py`：快速验证 MCP 服务器（stdio/streamable-http）与 LangGraph Agent 的基础流程。
 - `python operations_dashboard/call_insights_tool.py`：作为 MCP 客户端依次调用 `fetch_dashboard_data` 与 `generate_dashboard_insights`，用于结构化联调。
 - `python operations_dashboard/verify_amazon_keys.py`：检查 Amazon PAAPI 凭证是否配置正确。
-- **注意**：早期的独立 CLI 管道（`cli.py` + `DashboardPipeline`）已废弃，不再推荐直接运行 CLI；请统一通过 MCP 工具或 Agent 使用本项目能力。
+- **注意**：项目已完全采用纯远程 MCP 架构，所有业务能力通过 MCP 服务器提供，Agent 作为客户端调用。
 
 ## LangGraph Agent 与 Skill 架构
 
@@ -96,17 +96,18 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 
 ```
 operations_dashboard/
-├── agent.py                  # LangGraph Agent 入口
+├── agent.py                  # LangGraph Agent 入口（纯远程 MCP 模式）
 ├── call_insights_tool.py     # MCP 工具调试脚本
 ├── config.py                 # 应用配置
 ├── mcp_bridge.py             # MCP stdio 客户端封装
-├── mcp_server.py             # FastMCP 服务器
-├── services.py               # 业务逻辑与工具实现
+├── mcp_server.py             # FastMCP 服务器（提供所有业务能力）
+├── services.py               # 业务逻辑实现（MCP 服务器端使用）
 ├── test.py                   # 集成测试脚本
 ├── verify_amazon_keys.py     # Amazon 凭证检测
 ├── data_sources/             # 数据源定义与 Mock 实现
 ├── metrics/                  # 指标计算逻辑
-├── reporting/                # 报告格式化
+├── reporting/                # 报告格式化（仅 summary_to_dict）
+├── skills/                   # Skill 抽象层（MCP 服务器端使用）
 ├── storage/                  # SQLite 持久化实现
 └── utils/                    # 通用工具函数
 ```

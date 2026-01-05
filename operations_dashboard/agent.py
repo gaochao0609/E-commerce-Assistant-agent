@@ -1,4 +1,4 @@
-﻿"""基于 LangGraph 的运营日报智能体，封装工具调用链路并可通过 MCP 桥接远程服务。"""
+﻿"""基于 LangGraph 的运营日报智能体，通过 MCP 桥接远程服务（纯远程模式）。"""
 
 from __future__ import annotations
 
@@ -13,89 +13,61 @@ from langgraph.prebuilt import create_react_agent
 
 from .config import AppConfig
 from .mcp_bridge import call_mcp_tool
-from .services import (
-    ServiceContext,
-    create_service_context,
-)
-from .skills import Skill, build_dashboard_skills
-from .storage.repository import SQLiteRepository
 
-USE_MCP_BRIDGE = os.getenv("USE_MCP_BRIDGE", "0").lower() in {"1", "true", "yes"}
-# 标记是否通过 MCP 桥调用远端工具；默认仅使用本地 Skill / Service 实现。
+# 强制通过 MCP 桥调用远端工具；默认开启远程模式。
+USE_MCP_BRIDGE = os.getenv("USE_MCP_BRIDGE", "1").lower() not in {"0", "false", "no"}
 logger = logging.getLogger(__name__)
 
 
-def _call_mcp_bridge(tool_name: str, args: Dict[str, Any]) -> Optional[Any]:
+def _call_mcp_bridge(tool_name: str, args: Dict[str, Any]) -> Any:
     """
     功能说明:
-        当环境变量开启桥接模式时，通过 HTTP 与 MCP 服务通信获取工具结果。
+        通过 MCP 桥接远程调用指定工具（纯远程模式，无本地 fallback）。
     参数:
         tool_name (str): 预期在 MCP 侧注册的工具名称。
         args (Dict[str, Any]): 发送给 MCP 工具的参数字典，需保证可序列化。
     返回:
-        Optional[Any]: returns the remote result when bridging is enabled; returns `None` when bridging is disabled.
+        Any: 远端 MCP 工具返回的结构化结果。
+    异常:
+        RuntimeError: 当 MCP 工具调用失败时抛出。
     """
-    # 1. 若桥接未启用则直接跳过，保持调用方逻辑简洁。
     if not USE_MCP_BRIDGE:
-        return None
+        raise RuntimeError(
+            "MCP 桥接模式已禁用。请设置 USE_MCP_BRIDGE=1 启用，"
+            "并确保远端 MCP 服务器可访问。"
+        )
     try:
         logger.debug("调用 MCP 工具 %s，参数：%s", tool_name, args)
-        # 2. 实际触发 HTTP 请求并返回远端结果。
+        # 实际触发 MCP 请求并返回远端结果。
         return call_mcp_tool(tool_name, args)
     except Exception as exc:  # pragma: no cover
         logger.error("MCP 工具 %s 调用失败：%s", tool_name, exc)
         raise RuntimeError(f"MCP tool '{tool_name}' failed") from exc
 
 
-def _build_skill_index(context: ServiceContext) -> dict[str, Skill]:
-    """基于 ServiceContext 构建并索引所有核心技能。
-
-    返回一个 ``name -> Skill`` 的字典，便于在 LangChain 工具中按名称调用。
-    """
-    skills = build_dashboard_skills(context)
-    return {skill.name: skill for skill in skills}
-
-
 def build_operations_agent(
     config: AppConfig,
     *,
-    context: Optional[ServiceContext] = None,
-    repository: Optional[SQLiteRepository] = None,
+    context: Optional[object] = None,
+    repository: Optional[object] = None,
 ) -> tuple:
     """
     功能说明:
         构建具备运营分析能力的 LangGraph Agent，并注册所有领域工具。
+        所有工具调用均通过 MCP 桥接远端服务器，不再使用本地 Service/Skill 实现。
     参数:
         config (AppConfig): 包含仪表盘刷新窗口、存储、凭证等全局配置。
-        context (Optional[ServiceContext]): 预构建的服务上下文，可避免重复初始化。
-        repository (Optional[SQLiteRepository]): 外部注入的存储仓库实例，便于复用连接。
+        context (Optional[object]): 为兼容旧接口保留，当前实现中未使用。
+        repository (Optional[object]): 为兼容旧接口保留，当前实现中未使用。
     返回:
         tuple: `(graph, tools)`，其中 `graph` 为已组装好的智能体，`tools` 为工具列表。
     """
-    # 1. 构建默认服务上下文，包含数据源、存储以及可选的 LLM。
-    if context is None:
-        llm_for_services = (
-            ChatOpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                model="gpt-5-mini",
-                temperature=0,
-            )
-            if os.getenv("OPENAI_API_KEY")
-            else None
-        )
-        repository = repository or (
-            SQLiteRepository(config.storage.db_path) if config.storage.enabled else None
-        )
-        context = create_service_context(
-            config,
-            repository=repository,
-            llm=llm_for_services,
+    if not USE_MCP_BRIDGE:
+        raise RuntimeError(
+            "本地模式已移除。请确保 MCP 服务器正在运行，并设置 USE_MCP_BRIDGE=1。"
         )
 
-    # 2. 基于 ServiceContext 构建 Skill 索引，后续工具调用统一走 Skill 抽象。
-    skill_index = _build_skill_index(context)
-
-    # 3. 构建 Agent 主体使用的对话模型（与服务内部模型可不同）。
+    # 仅构建 Agent 主体使用的对话模型，业务调用全部走远程 MCP。
     llm = ChatOpenAI(
         api_key=os.environ.get("OPENAI_API_KEY"),
         model="gpt-5-mini",
@@ -111,7 +83,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用运营“取数”技能，拉取指定时间窗口内的销售和流量原始数据。
+            通过 MCP 调用远程工具 `fetch_dashboard_data`，
+            拉取指定时间窗口内的销售和流量原始数据。
         参数:
             start (Optional[str]): ISO 8601 起始时间，默认使用配置中的最近窗口。
             end (Optional[str]): ISO 8601 结束时间，缺省时根据 `start` 推导。
@@ -120,29 +93,20 @@ def build_operations_agent(
         返回:
             Dict[str, Any]: 包含销售、流量及衍生字段的原始数据载荷。
         """
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge(
-                "fetch_dashboard_data",
-                {
-                    "start": start,
-                    "end": end,
-                    "window_days": window_days,
-                    "top_n": top_n,
-                },
-            )
-            if not isinstance(remote, dict):
-                raise RuntimeError(
-                    "fetch_dashboard_data via MCP returned an invalid payload"
-                )
-            return remote
-
-        skill = skill_index["fetch_dashboard_data"]
-        return skill.invoke(
-            start=start,
-            end=end,
-            window_days=window_days,
-            top_n=top_n,
+        remote = _call_mcp_bridge(
+            "fetch_dashboard_data",
+            {
+                "start": start,
+                "end": end,
+                "window_days": window_days,
+                "top_n": top_n,
+            },
         )
+        if not isinstance(remote, dict):
+            raise RuntimeError(
+                "fetch_dashboard_data via MCP returned an invalid payload"
+            )
+        return remote
 
     @tool("compute_dashboard_metrics")
     def compute_dashboard_metrics_tool(
@@ -156,8 +120,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用“指标计算”技能，基于销售与流量数据计算 KPI，可复用
-            `fetch_dashboard_data` 的输出。
+            通过 MCP 调用远程工具 `compute_dashboard_metrics`，
+            基于销售与流量数据计算 KPI，可复用 `fetch_dashboard_data` 的输出。
         参数:
             start (str): 统计区间起始时间（ISO 8601）。
             end (str): 统计区间结束时间（ISO 8601）。
@@ -178,14 +142,10 @@ def build_operations_agent(
             "top_n": top_n,
             "window_days": window_days,
         }
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge("compute_dashboard_metrics", payload)
-            if not isinstance(remote, dict):
-                raise RuntimeError("compute_dashboard_metrics via MCP returned an invalid payload")
-            return remote
-
-        skill = skill_index["compute_dashboard_metrics"]
-        return skill.invoke(**payload)
+        remote = _call_mcp_bridge("compute_dashboard_metrics", payload)
+        if not isinstance(remote, dict):
+            raise RuntimeError("compute_dashboard_metrics via MCP returned an invalid payload")
+        return remote
 
     @tool("generate_dashboard_insights")
     def generate_dashboard_insights_tool(
@@ -198,8 +158,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用“洞察生成”技能，根据指标摘要生成洞见报告；当摘要缺失时，
-            技能内部会按需要自动拉取数据并计算指标。
+            通过 MCP 调用远程工具 `generate_dashboard_insights`，
+            根据指标摘要生成洞见报告；当摘要缺失时，远端服务会按需要自动拉取数据并计算指标。
         参数:
             summary (Optional[Dict[str, Any]]): 已计算好的指标摘要。
             focus (Optional[str]): 洞见关注的重点，例如 `sales`。
@@ -218,14 +178,10 @@ def build_operations_agent(
             "window_days": window_days,
             "top_n": top_n,
         }
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge("generate_dashboard_insights", payload)
-            if not isinstance(remote, dict):
-                raise RuntimeError("generate_dashboard_insights via MCP returned an invalid payload")
-            return remote
-
-        skill = skill_index["generate_dashboard_insights"]
-        return skill.invoke(**payload)
+        remote = _call_mcp_bridge("generate_dashboard_insights", payload)
+        if not isinstance(remote, dict):
+            raise RuntimeError("generate_dashboard_insights via MCP returned an invalid payload")
+        return remote
 
     @tool("analyze_dashboard_history")
     def analyze_dashboard_history_tool(
@@ -234,7 +190,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用“历史分析”技能，汇总历史仪表盘数据，生成时间序列趋势或异常分析。
+            通过 MCP 调用远程工具 `analyze_dashboard_history`，
+            汇总历史仪表盘数据，生成时间序列趋势或异常分析。
         参数:
             limit (int): 本次分析包含的历史期数。
             metrics (Optional[List[str]]): 需要重点关注的指标列表。
@@ -242,14 +199,10 @@ def build_operations_agent(
             Dict[str, Any]: 历史趋势与分析结论。
         """
         payload: Dict[str, Any] = {"limit": limit, "metrics": metrics}
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge("analyze_dashboard_history", payload)
-            if not isinstance(remote, dict):
-                raise RuntimeError("analyze_dashboard_history via MCP returned an invalid payload")
-            return remote
-
-        skill = skill_index["analyze_dashboard_history"]
-        return skill.invoke(**payload)
+        remote = _call_mcp_bridge("analyze_dashboard_history", payload)
+        if not isinstance(remote, dict):
+            raise RuntimeError("analyze_dashboard_history via MCP returned an invalid payload")
+        return remote
 
     @tool("export_dashboard_history")
     def export_dashboard_history_tool(
@@ -258,7 +211,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用“历史导出”技能，将历史仪表盘数据导出为 CSV 文件。
+            通过 MCP 调用远程工具 `export_dashboard_history`，
+            将历史仪表盘数据导出为 CSV 文件。
         参数:
             limit (int): 导出的历史期数上限。
             path (str): CSV 文件的输出路径。
@@ -266,14 +220,10 @@ def build_operations_agent(
             Dict[str, Any]: 导出结果与文件信息。
         """
         payload = {"limit": limit, "path": path}
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge("export_dashboard_history", payload)
-            if not isinstance(remote, dict):
-                raise RuntimeError("export_dashboard_history via MCP returned an invalid payload")
-            return remote
-
-        skill = skill_index["export_dashboard_history"]
-        return skill.invoke(**payload)
+        remote = _call_mcp_bridge("export_dashboard_history", payload)
+        if not isinstance(remote, dict):
+            raise RuntimeError("export_dashboard_history via MCP returned an invalid payload")
+        return remote
 
 
     @tool("amazon_bestseller_search")
@@ -285,7 +235,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用“畅销榜查询”技能，查询 Amazon PAAPI 热销榜单，获取指定分类的热门商品。
+            通过 MCP 调用远程工具 `amazon_bestseller_search`，
+            查询 Amazon PAAPI 热销榜单，获取指定分类的热门商品。
         参数:
             category (str): 自定义的业务分类名称。
             search_index (str): Amazon PAAPI 搜索索引，例如 `Toys` 或 `Books`。
@@ -300,14 +251,10 @@ def build_operations_agent(
             "browse_node_id": browse_node_id,
             "max_items": max_items,
         }
-        if USE_MCP_BRIDGE:
-            remote = _call_mcp_bridge("amazon_bestseller_search", payload)
-            if not isinstance(remote, dict):
-                raise RuntimeError("amazon_bestseller_search via MCP returned an invalid payload")
-            return remote
-
-        skill = skill_index["amazon_bestseller_search"]
-        return skill.invoke(**payload)
+        remote = _call_mcp_bridge("amazon_bestseller_search", payload)
+        if not isinstance(remote, dict):
+            raise RuntimeError("amazon_bestseller_search via MCP returned an invalid payload")
+        return remote
 
     tools = [
         fetch_dashboard_data_tool,
@@ -331,10 +278,7 @@ def run_agent_demo(config: AppConfig, query: str) -> Dict[str, Any]:
     返回:
         Dict[str, Any]: LangGraph 执行后的完整消息与工具调用轨迹。
     """
-    repository = None
-    if config.storage.enabled:
-        repository = SQLiteRepository(config.storage.db_path)
-    graph, _ = build_operations_agent(config, repository=repository)
+    graph, _ = build_operations_agent(config)
     result = graph.invoke(
         {
             "messages": [
