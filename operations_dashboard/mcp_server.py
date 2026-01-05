@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, cast
 from typing_extensions import TypedDict
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.prompts import base as prompt_base
 from mcp.server.session import ServerSession
 
 from operations_dashboard.config import (
@@ -21,14 +22,9 @@ from operations_dashboard.config import (
 )
 from operations_dashboard.services import (
     ServiceContext,
-    analyze_dashboard_history as _analyze_dashboard_history,
-    amazon_bestseller_search as _amazon_bestseller_search,
-    compute_dashboard_metrics as _compute_dashboard_metrics,
     create_service_context,
-    export_dashboard_history as _export_dashboard_history,
-    fetch_dashboard_data as _fetch_dashboard_data,
-    generate_dashboard_insights as _generate_dashboard_insights,
 )
+from operations_dashboard.skills import Skill, build_dashboard_skills
 from operations_dashboard.storage.repository import StoredSummary
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
@@ -39,6 +35,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv('MCP_SERVER_LOG_LEVEL', 'INFO').upper(), format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 
 GLOBAL_SERVICE_CONTEXT: Optional[ServiceContext] = None
+GLOBAL_SKILL_INDEX: Optional[Dict[str, Skill]] = None
 
 
 class SalesRecordPayload(TypedDict):
@@ -151,20 +148,23 @@ class AmazonBestsellerSearchResult(TypedDict):
 
 
 class DashboardAppContext:
-    """封装 MCP 生命周期中共享的业务依赖。
+    """封装 MCP 生命周期中共享的业务依赖与技能索引。
 
     Attributes:
         service_context (ServiceContext): 包含数据源、仓储、LLM 等资源的聚合上下文。
+        skill_index (dict[str, Skill]): 按名称索引的技能字典，供工具调用统一复用。
     """
 
-    def __init__(self, service_context: ServiceContext) -> None:
+    def __init__(self, service_context: ServiceContext, skill_index: Dict[str, Skill]) -> None:
         """初始化上下文容器。
 
         Args:
             service_context (ServiceContext): 通过 :func:`create_service_context` 构建的业务上下文。
+            skill_index (dict[str, Skill]): 基于 ``service_context`` 构建的技能索引。
         """
 
         self.service_context = service_context
+        self.skill_index = skill_index
 
 
 def _load_config() -> AppConfig:
@@ -205,10 +205,16 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DashboardAppContext]:
     service_context = create_service_context(config)
     if service_context.repository is not None:
         service_context.repository.initialize()
-    global GLOBAL_SERVICE_CONTEXT
+
+    skills = build_dashboard_skills(service_context)
+    skill_index: Dict[str, Skill] = {skill.name: skill for skill in skills}
+
+    global GLOBAL_SERVICE_CONTEXT, GLOBAL_SKILL_INDEX
     GLOBAL_SERVICE_CONTEXT = service_context
+    GLOBAL_SKILL_INDEX = skill_index
+
     try:
-        yield DashboardAppContext(service_context=service_context)
+        yield DashboardAppContext(service_context=service_context, skill_index=skill_index)
     finally:
         # 当前业务无额外清理动作，保留扩展点。
         pass
@@ -294,6 +300,26 @@ def _service(ctx: Context) -> ServiceContext:
     if GLOBAL_SERVICE_CONTEXT is not None:
         return GLOBAL_SERVICE_CONTEXT
     raise RuntimeError("Service context is not available; lifespan may not be initialized.")
+
+
+def _skills(ctx: Context) -> Dict[str, Skill]:
+    """从请求上下文里提取技能索引。
+
+    Args:
+        ctx (Context): FastMCP 请求上下文。
+
+    Returns:
+        Dict[str, Skill]: name -> Skill 的映射。
+    """
+
+    if hasattr(ctx, "fastmcp") and getattr(ctx.fastmcp, "settings", None):
+        try:
+            return ctx.fastmcp.app_context.skill_index  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+    if GLOBAL_SKILL_INDEX is not None:
+        return GLOBAL_SKILL_INDEX
+    raise RuntimeError("Skill index is not available; lifespan may not be initialized.")
 
 
 def _summary_to_dict(summary: StoredSummary) -> Dict[str, Any]:
@@ -399,8 +425,8 @@ def tool_fetch_dashboard_data(
         Dict[str, Any]: 含有销售、流量及商品列表的原始数据结构。
     """
 
-    result = _fetch_dashboard_data(
-        _service(ctx),
+    skill = _skills(ctx)["fetch_dashboard_data"]
+    result = skill.invoke(
         start=start,
         end=end,
         window_days=window_days,
@@ -428,8 +454,8 @@ def tool_generate_dashboard_insights(
         Dict[str, Any]: 结构化洞察结果，包含原始摘要与文本说明。
     """
 
-    result = _generate_dashboard_insights(
-        _service(ctx),
+    skill = _skills(ctx)["generate_dashboard_insights"]
+    result = skill.invoke(
         start=start,
         end=end,
         window_days=window_days,
@@ -454,8 +480,8 @@ def tool_analyze_dashboard_history(
         Dict[str, Any]: 含有趋势分析与时间序列数据的结果字典。
     """
 
-    result = _analyze_dashboard_history(
-        _service(ctx),
+    skill = _skills(ctx)["analyze_dashboard_history"]
+    result = skill.invoke(
         limit=limit,
         metrics=metrics,
     )
@@ -479,8 +505,8 @@ def tool_export_dashboard_history(
         Dict[str, Any]: 包含导出状态与文件路径的反馈信息。
     """
 
-    result = _export_dashboard_history(
-        _service(ctx),
+    skill = _skills(ctx)["export_dashboard_history"]
+    result = skill.invoke(
         limit=limit,
         path=path,
     )
@@ -508,8 +534,8 @@ def tool_amazon_bestseller_search(
         Dict[str, Any]: 包含热销商品列表及摘要信息的字典。
     """
 
-    result = _amazon_bestseller_search(
-        _service(ctx),
+    skill = _skills(ctx)["amazon_bestseller_search"]
+    result = skill.invoke(
         category=category,
         search_index=search_index,
         browse_node_id=browse_node_id,
@@ -543,8 +569,8 @@ def tool_compute_dashboard_metrics(
         Dict[str, Any]: 计算后的 KPI 摘要信息。
     """
 
-    result = _compute_dashboard_metrics(
-        _service(ctx),
+    skill = _skills(ctx)["compute_dashboard_metrics"]
+    result = skill.invoke(
         start=start,
         end=end,
         source=source,
@@ -553,6 +579,68 @@ def tool_compute_dashboard_metrics(
         top_n=top_n,
     )
     return cast(ComputeDashboardMetricsResult, result)
+
+
+@mcp.prompt(title="Daily Operations Report")
+def daily_operations_report_prompt(
+    marketplace: str = "US",
+    window_days: int = 7,
+    focus: Optional[str] = None,
+) -> str:
+    """生成一段用于“运营日报”对话的系统提示模板。
+
+    客户端可以先获取此 Prompt，再结合 MCP 工具调用（如
+    `fetch_dashboard_data`、`compute_dashboard_metrics`、
+    `generate_dashboard_insights`）完成整套分析流程。
+    """
+
+    focus_hint = f"，重点关注 {focus} 相关的表现" if focus else ""
+    return (
+        "你是一名资深亚马逊运营分析顾问，需要生成一份结构化的运营日报。\n"
+        f"- 目标站点：{marketplace}\n"
+        f"- 时间窗口：最近 {window_days} 天\n"
+        f"- 报告目标：梳理整体业绩、Top 商品表现、流量与转化情况{focus_hint}。\n\n"
+        "请结合可用的 MCP 工具按以下顺序思考：\n"
+        "1) 使用 `fetch_dashboard_data` 获取指定时间窗口的销售与流量原始数据；\n"
+        "2) 使用 `compute_dashboard_metrics` 汇总 KPI 与 Top 商品；\n"
+        "3) 使用 `generate_dashboard_insights` 生成自然语言洞察；\n"
+        "4) 如有需要，可使用 `analyze_dashboard_history` 做趋势与同比分析；\n"
+        "5) 如果用户要求导出数据，可调用 `export_dashboard_history` 生成 CSV。\n\n"
+        "最终输出请包含：窗口信息、核心 KPI、Top 商品要点，以及 3~5 条可执行的运营建议。"
+    )
+
+
+@mcp.prompt(title="Anomaly Investigation")
+def anomaly_investigation_prompt(
+    metric: str = "revenue",
+    window_days: int = 7,
+    compare_with_history: bool = True,
+) -> str:
+    """用于“异常排查”场景的 Prompt 模板。
+
+    典型用法：当运营侧发现某个指标异常波动时，让模型驱动一轮
+    “取数 → 对比历史 → 给诊断结论与建议” 的工具调用过程。
+    """
+
+    history_hint = (
+        "，并结合 `analyze_dashboard_history` 对比最近几期变化"
+        if compare_with_history
+        else ""
+    )
+    return (
+        "你现在要扮演“异常指标排查专家”，帮助用户定位某个运营指标的异常原因。\n"
+        f"- 关注指标：{metric}\n"
+        f"- 观察窗口：最近 {window_days} 天\n\n"
+        "建议的工具调用步骤：\n"
+        "1) 使用 `fetch_dashboard_data` 拉取最近窗口的原始数据；\n"
+        "2) 使用 `compute_dashboard_metrics` 计算当前期的 KPI 与 Top 商品；\n"
+        f"3) 针对指标 `{metric}` 查找显著波动的 ASIN 或时间段{history_hint}；\n"
+        "4) 结合 `generate_dashboard_insights` 生成诊断结论与后续行动建议。\n\n"
+        "请在回答中明确列出：\n"
+        "- 异常是否真实存在（而不是数据噪音）；\n"
+        "- 可能的根因假设（如流量骤降、转化率下滑、退款飙升、类目竞争变化等）；\n"
+        "- 接下来 3~5 条最优先的排查与优化动作。"
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> None:

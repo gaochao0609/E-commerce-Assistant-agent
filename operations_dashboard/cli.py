@@ -1,4 +1,9 @@
-﻿"""运营仪表盘演示的命令行入口，串联数据拉取与报告生成。"""
+﻿"""（已弃用）早期的命令行演示入口。
+
+本项目现在统一通过 MCP 工具与 LangGraph Agent 调用业务能力，
+不再推荐使用独立的 CLI 管道。保留本文件仅为向后兼容，
+如直接执行会抛出明确异常提示。
+"""
 
 import argparse
 import json
@@ -103,45 +108,15 @@ def persist_summary(config: AppConfig, summary) -> SQLiteRepository:
 
 def run_cli() -> None:
     """
-    功能说明:
-        命令行主入口：读取参数、执行管道、输出报告并根据需要持久化。
+    本 CLI 路线已废弃。
+
+    请改用：
+    - 通过 MCP 客户端调用 `operations_dashboard.mcp_server` 暴露的工具；或
+    - 使用 `agent.py` 中的 LangGraph Agent（可通过 MCP 桥接远程）。
     """
-    args = parse_args()
-    if args.mode == "live":
-        raise NotImplementedError(
-            "Live Amazon integration is not wired yet. Use --mode mock or plug in a real data source."
-        )
-
-    config = build_mock_config(args)
-    data_source = create_default_mock_source(config)
-    pipeline = DashboardPipeline(config=config, data_source=data_source)
-
-    start = parse_date(args.start)
-    end = parse_date(args.end)
-    summary = pipeline.run(start=start, end=end, top_n=args.top_n)
-
-    report_text = format_text_report(summary)
-    print(report_text)
-
-    if args.output_json:
-        # 将汇总转为 JSON 并写入文件，encode 为 UTF-8 以保留中文字符。
-        payload = summary_to_dict(summary)
-        args.output_json.parent.mkdir(parents=True, exist_ok=True)
-        args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"JSON report written to: {args.output_json}")
-
-    repo: Optional[SQLiteRepository] = None
-    if config.storage.enabled:
-        repo = persist_summary(config, summary)
-
-    if repo and args.history > 0:
-        print(f"\n最近 {args.history} 期历史概览：")
-        for stored in repo.fetch_recent_summaries(limit=args.history):
-            revenue_str = f"{stored.total_revenue:,.2f}"
-            print(
-                f"[{stored.id}] {stored.start}~{stored.end} | Revenue {revenue_str} | "
-                f"Units {stored.total_units} | Sessions {stored.total_sessions}"
-            )
+    raise RuntimeError(
+        "CLI 路线已废弃，请通过 MCP 工具或 Agent 使用本项目能力（see README 中的 MCP/Agent 说明）。"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

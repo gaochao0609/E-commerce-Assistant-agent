@@ -15,18 +15,13 @@ from .config import AppConfig
 from .mcp_bridge import call_mcp_tool
 from .services import (
     ServiceContext,
-    analyze_dashboard_history,
-    amazon_bestseller_search,
-    compute_dashboard_metrics,
     create_service_context,
-    export_dashboard_history,
-    fetch_dashboard_data,
-    generate_dashboard_insights,
 )
+from .skills import Skill, build_dashboard_skills
 from .storage.repository import SQLiteRepository
 
 USE_MCP_BRIDGE = os.getenv("USE_MCP_BRIDGE", "0").lower() in {"1", "true", "yes"}
-# 标记是否通过 HTTP MCP 桥调用远端工具；默认仅使用本地实现。
+# 标记是否通过 MCP 桥调用远端工具；默认仅使用本地 Skill / Service 实现。
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +45,15 @@ def _call_mcp_bridge(tool_name: str, args: Dict[str, Any]) -> Optional[Any]:
     except Exception as exc:  # pragma: no cover
         logger.error("MCP 工具 %s 调用失败：%s", tool_name, exc)
         raise RuntimeError(f"MCP tool '{tool_name}' failed") from exc
+
+
+def _build_skill_index(context: ServiceContext) -> dict[str, Skill]:
+    """基于 ServiceContext 构建并索引所有核心技能。
+
+    返回一个 ``name -> Skill`` 的字典，便于在 LangChain 工具中按名称调用。
+    """
+    skills = build_dashboard_skills(context)
+    return {skill.name: skill for skill in skills}
 
 
 def build_operations_agent(
@@ -82,8 +86,16 @@ def build_operations_agent(
         repository = repository or (
             SQLiteRepository(config.storage.db_path) if config.storage.enabled else None
         )
-        context = create_service_context(config, repository=repository, llm=llm_for_services)
-    # 2. 构建 Agent 主体使用的对话模型（与服务内部模型可不同）。
+        context = create_service_context(
+            config,
+            repository=repository,
+            llm=llm_for_services,
+        )
+
+    # 2. 基于 ServiceContext 构建 Skill 索引，后续工具调用统一走 Skill 抽象。
+    skill_index = _build_skill_index(context)
+
+    # 3. 构建 Agent 主体使用的对话模型（与服务内部模型可不同）。
     llm = ChatOpenAI(
         api_key=os.environ.get("OPENAI_API_KEY"),
         model="gpt-5-mini",
@@ -99,7 +111,7 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            调用服务层拉取指定时间窗口内的销售和流量原始数据。
+            调用运营“取数”技能，拉取指定时间窗口内的销售和流量原始数据。
         参数:
             start (Optional[str]): ISO 8601 起始时间，默认使用配置中的最近窗口。
             end (Optional[str]): ISO 8601 结束时间，缺省时根据 `start` 推导。
@@ -123,8 +135,9 @@ def build_operations_agent(
                     "fetch_dashboard_data via MCP returned an invalid payload"
                 )
             return remote
-        return fetch_dashboard_data(
-            context,
+
+        skill = skill_index["fetch_dashboard_data"]
+        return skill.invoke(
             start=start,
             end=end,
             window_days=window_days,
@@ -143,48 +156,19 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            基于销售与流量数据计算 KPI，可复用 `fetch_dashboard_data` 的输出。
+            调用“指标计算”技能，基于销售与流量数据计算 KPI，可复用
+            `fetch_dashboard_data` 的输出。
         参数:
             start (str): 统计区间起始时间（ISO 8601）。
             end (str): 统计区间结束时间（ISO 8601）。
             source (str): 数据来源标识，例如 `amazon_paapi`。
-            sales (Optional[List[Dict[str, Any]]]): 可选的销售数据数组，缺省时由服务层补全。
-            traffic (Optional[List[Dict[str, Any]]]): 可选的流量数据数组，缺省时由服务层补全。
+            sales (Optional[List[Dict[str, Any]]]): 可选的销售数据数组，缺省时由技能内部补全。
+            traffic (Optional[List[Dict[str, Any]]]): 可选的流量数据数组，缺省时由技能内部补全。
             top_n (Optional[int]): 指定仅保留排名前 N 的指标。
             window_days (Optional[int]): 仅提供起止时间之一时使用的默认跨度。
         返回:
             Dict[str, Any]: 计算后的指标摘要与中间数据。
         """
-        data: Dict[str, Any] | None = None
-        if sales is None or traffic is None:
-            fetch_args: Dict[str, Any] = {
-                "start": start or None,
-                "end": end or None,
-                "window_days": window_days,
-                "top_n": top_n,
-            }
-            fetch_args = {k: v for k, v in fetch_args.items() if v not in (None, "")}
-            if USE_MCP_BRIDGE:
-                remote_fetch = _call_mcp_bridge("fetch_dashboard_data", fetch_args)
-                if not isinstance(remote_fetch, dict):
-                    raise RuntimeError("fetch_dashboard_data via MCP returned an invalid payload")
-                data = remote_fetch
-            else:
-                data = fetch_dashboard_data(
-                    context,
-                    start=start,
-                    end=end,
-                    window_days=window_days,
-                    top_n=top_n,
-                )
-            sales = data.get("sales") if data else sales
-            traffic = data.get("traffic") if data else traffic
-            start = (data.get("start") if data else None) or start
-            end = (data.get("end") if data else None) or end
-            source = (data.get("source") if data else None) or source or context.config.dashboard.marketplace
-            if sales is None or traffic is None:
-                raise RuntimeError("compute_dashboard_metrics 需要销售或流量数据，无法继续计算")
-
         payload = {
             "start": start,
             "end": end,
@@ -192,21 +176,16 @@ def build_operations_agent(
             "sales": sales,
             "traffic": traffic,
             "top_n": top_n,
+            "window_days": window_days,
         }
         if USE_MCP_BRIDGE:
             remote = _call_mcp_bridge("compute_dashboard_metrics", payload)
             if not isinstance(remote, dict):
                 raise RuntimeError("compute_dashboard_metrics via MCP returned an invalid payload")
             return remote
-        return compute_dashboard_metrics(
-            context,
-            start=start,
-            end=end,
-            source=source,
-            sales=sales,
-            traffic=traffic,
-            top_n=top_n,
-        )
+
+        skill = skill_index["compute_dashboard_metrics"]
+        return skill.invoke(**payload)
 
     @tool("generate_dashboard_insights")
     def generate_dashboard_insights_tool(
@@ -219,7 +198,8 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            根据指标摘要生成洞见报告，可在缺省时自动拉取并计算指标。
+            调用“洞察生成”技能，根据指标摘要生成洞见报告；当摘要缺失时，
+            技能内部会按需要自动拉取数据并计算指标。
         参数:
             summary (Optional[Dict[str, Any]]): 已计算好的指标摘要。
             focus (Optional[str]): 洞见关注的重点，例如 `sales`。
@@ -230,65 +210,22 @@ def build_operations_agent(
         返回:
             Dict[str, Any]: 包含洞见文本及辅助数据的结果。
         """
-        working_summary = summary
-        if working_summary is None:
-            fetch_args: Dict[str, Any] = {
-                "start": start or None,
-                "end": end or None,
-                "window_days": window_days,
-                "top_n": top_n,
-            }
-            fetch_args = {k: v for k, v in fetch_args.items() if v not in (None, "")}
-            if USE_MCP_BRIDGE:
-                data = _call_mcp_bridge("fetch_dashboard_data", fetch_args)
-                if not isinstance(data, dict):
-                    raise RuntimeError("fetch_dashboard_data via MCP returned an invalid payload")
-            else:
-                data = fetch_dashboard_data(
-                    context,
-                    start=start,
-                    end=end,
-                    window_days=window_days,
-                    top_n=top_n,
-                )
-            data_start = data.get("start") or start
-            data_end = data.get("end") or end
-            data_source = data.get("source") or context.config.dashboard.marketplace
-            compute_payload = {
-                "start": data_start,
-                "end": data_end,
-                "source": data_source,
-                "sales": data.get("sales", []),
-                "traffic": data.get("traffic", []),
-                "top_n": top_n,
-            }
-            if USE_MCP_BRIDGE:
-                metrics_result = _call_mcp_bridge("compute_dashboard_metrics", compute_payload)
-                if not isinstance(metrics_result, dict):
-                    raise RuntimeError("compute_dashboard_metrics via MCP returned an invalid payload")
-            else:
-                metrics_result = compute_dashboard_metrics(
-                    context,
-                    start=data_start,
-                    end=data_end,
-                    source=data_source,
-                    sales=compute_payload["sales"],
-                    traffic=compute_payload["traffic"],
-                    top_n=top_n,
-                )
-            working_summary = metrics_result.get("summary") if isinstance(metrics_result, dict) else None
-            if working_summary is None:
-                raise RuntimeError("无法从指标结果中提取 summary 字段")
-
-        payload: Dict[str, Any] = {"summary": working_summary}
-        if focus is not None:
-            payload["focus"] = focus
+        payload: Dict[str, Any] = {
+            "summary": summary,
+            "focus": focus,
+            "start": start,
+            "end": end,
+            "window_days": window_days,
+            "top_n": top_n,
+        }
         if USE_MCP_BRIDGE:
             remote = _call_mcp_bridge("generate_dashboard_insights", payload)
             if not isinstance(remote, dict):
                 raise RuntimeError("generate_dashboard_insights via MCP returned an invalid payload")
             return remote
-        return generate_dashboard_insights(context, summary=working_summary, focus=focus)
+
+        skill = skill_index["generate_dashboard_insights"]
+        return skill.invoke(**payload)
 
     @tool("analyze_dashboard_history")
     def analyze_dashboard_history_tool(
@@ -297,7 +234,7 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            汇总历史仪表盘数据，生成时间序列趋势或异常分析。
+            调用“历史分析”技能，汇总历史仪表盘数据，生成时间序列趋势或异常分析。
         参数:
             limit (int): 本次分析包含的历史期数。
             metrics (Optional[List[str]]): 需要重点关注的指标列表。
@@ -310,7 +247,9 @@ def build_operations_agent(
             if not isinstance(remote, dict):
                 raise RuntimeError("analyze_dashboard_history via MCP returned an invalid payload")
             return remote
-        return analyze_dashboard_history(context, limit=limit, metrics=metrics)
+
+        skill = skill_index["analyze_dashboard_history"]
+        return skill.invoke(**payload)
 
     @tool("export_dashboard_history")
     def export_dashboard_history_tool(
@@ -319,7 +258,7 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            导出历史仪表盘数据并保存为 CSV 文件。
+            调用“历史导出”技能，将历史仪表盘数据导出为 CSV 文件。
         参数:
             limit (int): 导出的历史期数上限。
             path (str): CSV 文件的输出路径。
@@ -332,7 +271,9 @@ def build_operations_agent(
             if not isinstance(remote, dict):
                 raise RuntimeError("export_dashboard_history via MCP returned an invalid payload")
             return remote
-        return export_dashboard_history(context, limit=limit, path=path)
+
+        skill = skill_index["export_dashboard_history"]
+        return skill.invoke(**payload)
 
 
     @tool("amazon_bestseller_search")
@@ -344,7 +285,7 @@ def build_operations_agent(
     ) -> Dict[str, Any]:
         """
         函数说明:
-            查询 Amazon PAAPI 热销榜单，获取指定分类的热门商品。
+            调用“畅销榜查询”技能，查询 Amazon PAAPI 热销榜单，获取指定分类的热门商品。
         参数:
             category (str): 自定义的业务分类名称。
             search_index (str): Amazon PAAPI 搜索索引，例如 `Toys` 或 `Books`。
@@ -364,13 +305,9 @@ def build_operations_agent(
             if not isinstance(remote, dict):
                 raise RuntimeError("amazon_bestseller_search via MCP returned an invalid payload")
             return remote
-        return amazon_bestseller_search(
-            context,
-            category=category,
-            search_index=search_index,
-            browse_node_id=browse_node_id,
-            max_items=max_items,
-        )
+
+        skill = skill_index["amazon_bestseller_search"]
+        return skill.invoke(**payload)
 
     tools = [
         fetch_dashboard_data_tool,

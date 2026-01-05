@@ -73,15 +73,24 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 
 ## 常用脚本
 
-- `python operations_dashboard/test.py`：快速验证 stdio 管道与 LangGraph Agent 的基础流程。
-- `python operations_dashboard/call_insights_tool.py`：在命令行中依次调用 `fetch_dashboard_data` 与 `generate_dashboard_insights`，用于结构化联调。
+- `python operations_dashboard/test.py`：快速验证 MCP 服务器（stdio/streamable-http）与 LangGraph Agent 的基础流程。
+- `python operations_dashboard/call_insights_tool.py`：作为 MCP 客户端依次调用 `fetch_dashboard_data` 与 `generate_dashboard_insights`，用于结构化联调。
 - `python operations_dashboard/verify_amazon_keys.py`：检查 Amazon PAAPI 凭证是否配置正确。
+- **注意**：早期的独立 CLI 管道（`cli.py` + `DashboardPipeline`）已废弃，不再推荐直接运行 CLI；请统一通过 MCP 工具或 Agent 使用本项目能力。
 
-## LangGraph Agent 协同
+## LangGraph Agent 与 Skill 架构
 
-- `agent.py` 定义了 LangGraph 的运营分析 Agent，可作为脚本运行，也可以通过 MCP 桥接到远程。
-- MCP 模式下默认执行 `python -m operations_dashboard.mcp_server`，可用 `MCP_BRIDGE_COMMAND`/`MCP_BRIDGE_ARGS`/`MCP_BRIDGE_ENV` 覆盖。
-- 当 `USE_MCP_BRIDGE` 关闭时，Agent 将直接调用本地实现，无需 MCP。
+- `agent.py` 定义了基于 **Skill 抽象** 的 LangGraph 运营分析 Agent：
+  - 每个能力（取数、算指标、生成洞察、历史分析、历史导出、畅销榜查询）都被封装为一个 `Skill`；
+  - Agent 只关心 “调用哪个 Skill、传什么参数”，而不关心底层是本地实现还是通过 MCP 远程调用。
+- `operations_dashboard/skills/` 中提供了通用的 `Skill` 抽象与仪表盘相关的具体实现：
+  - `Skill`：定义统一的 `name` / `description` / `invoke(**kwargs)` 接口，方便映射到 LangChain 工具或 OpenAI/MCP 的 tool 调用；
+  - `dashboard.py`：基于 `ServiceContext` 构建一组运营相关的技能（`fetch_dashboard_data`、`compute_dashboard_metrics` 等）。
+- MCP 模式（`USE_MCP_BRIDGE=1`）下：
+  - Agent 会通过 `mcp_bridge` 将同名工具代理到远程 MCP 服务器；
+  - Skill 仍然可在本地或其他 Agent 容器中复用，但当前对话会优先走 MCP。
+- 本地模式（未设置或关闭 `USE_MCP_BRIDGE`）下：
+  - Agent 直接调用本地 Skill 实现，底层再委托给 `services.py` / `metrics/` / `storage/` 等模块完成具体工作。
 
 ## 目录结构
 
