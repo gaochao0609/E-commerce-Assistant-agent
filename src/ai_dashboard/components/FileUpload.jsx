@@ -32,6 +32,7 @@ export default function FileUpload({ uploadMeta, uploadError, isUploading, onUpl
           ref={inputRef}
           type="file"
           accept=".xlsx,.xls,.csv"
+          aria-label="Data upload file"
           onChange={handleChange}
           disabled={isUploading}
         />

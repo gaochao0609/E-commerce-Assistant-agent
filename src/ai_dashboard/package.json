@@ -7,7 +7,11 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:unit": "vitest -c ../../tests/ai_dashboard/vitest.config.mjs run",
+    "test:watch": "vitest -c ../../tests/ai_dashboard/vitest.config.mjs",
+    "test:e2e": "playwright test -c ../../tests/ai_dashboard/playwright.config.mjs",
+    "test:smoke": "node ../../tests/ai_dashboard/smoke.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "^0.0.15",
@@ -23,6 +27,8 @@
   },
   "devDependencies": {
     "eslint": "^8.57.0",
-    "eslint-config-next": "^14.1.0"
+    "eslint-config-next": "^14.1.0",
+    "playwright": "^1.50.1",
+    "vitest": "^1.4.0"
   }
 }
