@@ -112,6 +112,43 @@ operations_dashboard/
 `-- utils/                    # Utilities
 ```
 
+## AI 助手前端（Vercel AI SDK）
+
+该前端为独立的 Next.js 应用，位于 `src/ai_dashboard`，用于内部运维的对话式指标查询与报告生成。
+
+### 运行方式
+
+```powershell
+cd src/ai_dashboard
+npm install
+copy .env.example .env.local
+npm run dev
+```
+
+默认端口为 `3001`，访问地址为 `http://localhost:3001`。
+
+### 配置说明
+
+- **主配置文件**：`configs/ai_dashboard.json`
+- **环境变量**：
+  - `OPENAI_API_KEY`：Vercel AI SDK 调用模型所需的密钥
+  - `AI_DASHBOARD_CONFIG_PATH`：可选，覆盖配置文件路径
+
+### 测试与验证
+
+```powershell
+# 单元测试
+npm run test:unit
+
+# E2E 测试（需要先启动 dev server）
+$env:E2E_BASE_URL = "http://localhost:3001"
+npm run test:e2e
+
+# 冒烟测试
+$env:SMOKE_BASE_URL = "http://localhost:3001"
+npm run test:smoke
+```
+
 ## 常见问题
 
 1. **`generate_dashboard_insights` 报错缺少 `OPENAI_API_KEY`**  
