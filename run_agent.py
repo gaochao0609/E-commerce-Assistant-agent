@@ -1,5 +1,7 @@
 """简单的 Agent 运行脚本示例"""
 
+import os
+
 from operations_dashboard.agent import run_agent_demo
 from operations_dashboard.config import (
     AppConfig,
@@ -14,6 +16,9 @@ if __name__ == "__main__":
         amazon=AmazonCredentialConfig(access_key="mock", secret_key="mock"),
         dashboard=DashboardConfig(),
         storage=StorageConfig(),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+        openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "0")),
     )
 
     # 运行 Agent

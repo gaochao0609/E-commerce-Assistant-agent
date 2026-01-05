@@ -117,18 +117,23 @@ class StorageConfig:
 @dataclass
 class AppConfig:
     """
-    顶层组合配置，聚合凭证、仪表盘与存储设置。
+    顶层组合配置，聚合凭证、仪表盘、存储与 LLM 设置。
 
     属性:
         amazon (AmazonCredentialConfig): Amazon 接入凭证。
         dashboard (DashboardConfig): 仪表盘运行参数。
         storage (StorageConfig): 持久化相关设置。
+        openai_api_key (Optional[str]): OpenAI API Key。
+        openai_model (str): 默认模型名称。
+        openai_temperature (float): 生成温度。
     """
 
     amazon: AmazonCredentialConfig
     dashboard: DashboardConfig
     storage: StorageConfig
     openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-5-mini"
+    openai_temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -143,4 +148,6 @@ class AppConfig:
             dashboard=DashboardConfig.from_env(),
             storage=StorageConfig.from_env(),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "0")),
         )

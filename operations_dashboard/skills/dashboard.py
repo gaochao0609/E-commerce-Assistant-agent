@@ -72,9 +72,9 @@ class ComputeDashboardMetricsSkill(_ContextBoundSkill):
     def invoke(
         self,
         *,
-        start: str,
-        end: str,
-        source: str,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        source: Optional[str] = None,
         sales: Optional[List[Dict[str, Any]]] = None,
         traffic: Optional[List[Dict[str, Any]]] = None,
         top_n: Optional[int] = None,
@@ -87,6 +87,11 @@ class ComputeDashboardMetricsSkill(_ContextBoundSkill):
         effective_start = start
         effective_end = end
         effective_source = source or self.context.config.dashboard.marketplace
+
+        if (effective_start is None or effective_end is None) and (
+            sales is not None and traffic is not None
+        ):
+            raise RuntimeError("compute_dashboard_metrics 需要 start/end 或缺省以触发自动取数。")
 
         if working_sales is None or working_traffic is None:
             data = fetch_dashboard_data(
@@ -104,6 +109,8 @@ class ComputeDashboardMetricsSkill(_ContextBoundSkill):
 
         if working_sales is None or working_traffic is None:
             raise RuntimeError("compute_dashboard_metrics 需要销售和流量数据，当前参数不完整。")
+        if effective_start is None or effective_end is None:
+            raise RuntimeError("compute_dashboard_metrics 缺少 start/end，无法计算指标。")
 
         return compute_dashboard_metrics(
             self.context,

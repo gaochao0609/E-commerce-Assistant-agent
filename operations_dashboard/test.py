@@ -94,7 +94,7 @@ def _exercise_tools_with_storage() -> None:
     previous_amazon_secret_key = os.environ.get("AMAZON_SECRET_KEY")
     previous_amazon_associate_tag = os.environ.get("AMAZON_ASSOCIATE_TAG")
     previous_amazon_marketplace = os.environ.get("AMAZON_MARKETPLACE")
-    previous_bridge_env = mcp_bridge.DEFAULT_ENV
+    previous_bridge_env = os.environ.get("MCP_BRIDGE_ENV")
     try:
         with TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "operations.sqlite3"
@@ -118,8 +118,8 @@ def _exercise_tools_with_storage() -> None:
                     "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
                 }
             )
-            previous_bridge_env = mcp_bridge.DEFAULT_ENV
-            mcp_bridge.DEFAULT_ENV = bridge_env_json
+            previous_bridge_env = os.environ.get("MCP_BRIDGE_ENV")
+            os.environ["MCP_BRIDGE_ENV"] = bridge_env_json
             cfg = AppConfig.from_env()
             print(
                 "[debug] 生效的存储配置:",
@@ -216,7 +216,10 @@ def _exercise_tools_with_storage() -> None:
             os.environ.pop("AMAZON_MARKETPLACE", None)
         else:
             os.environ["AMAZON_MARKETPLACE"] = previous_amazon_marketplace
-        mcp_bridge.DEFAULT_ENV = previous_bridge_env
+        if previous_bridge_env is None:
+            os.environ.pop("MCP_BRIDGE_ENV", None)
+        else:
+            os.environ["MCP_BRIDGE_ENV"] = previous_bridge_env
 
 
 async def _probe_http_once(server_url: str) -> Dict[str, Any]:

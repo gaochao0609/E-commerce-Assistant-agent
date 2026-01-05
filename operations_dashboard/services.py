@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -104,12 +103,21 @@ def create_service_context(
     data_source = data_source or create_default_mock_source(config)
     if repository is None and config.storage.enabled:
         repository = SQLiteRepository(config.storage.db_path)
-    api_key = config.openai_api_key or os.getenv("OPENAI_API_KEY")
-    logger.debug("create_service_context key_present=%s ChatOpenAI=%s initial_llm=%s", bool(api_key), ChatOpenAI, llm)
+    api_key = config.openai_api_key
+    logger.debug(
+        "create_service_context key_present=%s ChatOpenAI=%s initial_llm=%s",
+        bool(api_key),
+        ChatOpenAI,
+        llm,
+    )
     if ChatOpenAI is None:
         raise RuntimeError("ChatOpenAI import returned None. Check langchain-openai installation.")
     if llm is None and api_key:
-        llm = ChatOpenAI(api_key=api_key, model="gpt-5-mini", temperature=0)
+        llm = ChatOpenAI(
+            api_key=api_key,
+            model=config.openai_model,
+            temperature=config.openai_temperature,
+        )
     context = ServiceContext(config=config, data_source=data_source, repository=repository, llm=llm)
     logger.debug("create_service_context returning llm=%s", context.llm)
     return context
@@ -325,9 +333,15 @@ def fetch_dashboard_data(
     # 1. 解析用户输入的日期字符串；若缺失则稍后根据配置计算窗口。
     parsed_start = date.fromisoformat(start) if start else None
     parsed_end = date.fromisoformat(end) if end else None
-    if parsed_start is None or parsed_end is None:
-        # 2. 当任意一端缺失时，按照配置的窗口天数自动回填。
-        window = window_days or context.config.dashboard.refresh_window_days
+    window = window_days or context.config.dashboard.refresh_window_days
+    if parsed_start and not parsed_end:
+        # 2. 仅提供起始日期时，根据窗口长度推算结束日期。
+        parsed_end = parsed_start + timedelta(days=max(window, 1) - 1)
+    elif parsed_end and not parsed_start:
+        # 3. 仅提供结束日期时，根据窗口长度回推起始日期。
+        parsed_start = parsed_end - timedelta(days=max(window, 1) - 1)
+    elif parsed_start is None and parsed_end is None:
+        # 4. 两端均缺失时，使用默认窗口。
         parsed_start, parsed_end = recent_period(window)
 
     # 3. 调用数据源获取销量与流量原始记录。

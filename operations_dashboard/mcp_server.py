@@ -187,6 +187,8 @@ def _load_config() -> AppConfig:
             dashboard=DashboardConfig(),
             storage=StorageConfig(),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "0")),
         )
 
 
@@ -438,17 +440,23 @@ def tool_fetch_dashboard_data(
 @mcp.tool(name="generate_dashboard_insights")
 def tool_generate_dashboard_insights(
     ctx: Context,
+    summary: Optional[Dict[str, Any]] = None,
+    focus: Optional[str] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
     window_days: Optional[int] = None,
+    top_n: Optional[int] = None,
 ) -> GenerateDashboardInsightsResult:
     """基于业务服务生成自然语言洞察。
 
     Args:
         ctx (Context): FastMCP 请求上下文。
+        summary (Optional[Dict[str, Any]]): 已有的 KPI 摘要，缺省时自动计算。
+        focus (Optional[str]): 洞察关注的重点维度。
         start (Optional[str]): 起始日期。
         end (Optional[str]): 结束日期。
         window_days (Optional[int]): 更新时间窗口天数。
+        top_n (Optional[int]): 重点商品数量。
 
     Returns:
         Dict[str, Any]: 结构化洞察结果，包含原始摘要与文本说明。
@@ -456,9 +464,12 @@ def tool_generate_dashboard_insights(
 
     skill = _skills(ctx)["generate_dashboard_insights"]
     result = skill.invoke(
+        summary=summary,
+        focus=focus,
         start=start,
         end=end,
         window_days=window_days,
+        top_n=top_n,
     )
     return cast(GenerateDashboardInsightsResult, result)
 
@@ -547,23 +558,25 @@ def tool_amazon_bestseller_search(
 @mcp.tool(name="compute_dashboard_metrics")
 def tool_compute_dashboard_metrics(
     ctx: Context,
-    start: str,
-    end: str,
-    source: str,
-    sales: List[SalesRecordPayload],
-    traffic: List[TrafficRecordPayload],
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    source: Optional[str] = None,
+    sales: Optional[List[SalesRecordPayload]] = None,
+    traffic: Optional[List[TrafficRecordPayload]] = None,
     top_n: Optional[int] = None,
+    window_days: Optional[int] = None,
 ) -> ComputeDashboardMetricsResult:
     """根据原始数据计算 KPI 并持久化摘要结果。
 
     Args:
         ctx (Context): FastMCP 请求上下文。
-        start (str): 起始日期（ISO 字符串）。
-        end (str): 结束日期（ISO 字符串）。
-        source (str): 数据来源标识。
-        sales (list[Dict[str, Any]]): 销售数据列表。
-        traffic (list[Dict[str, Any]]): 流量数据列表。
+        start (Optional[str]): 起始日期（ISO 字符串）。
+        end (Optional[str]): 结束日期（ISO 字符串）。
+        source (Optional[str]): 数据来源标识。
+        sales (Optional[list[Dict[str, Any]]]): 销售数据列表。
+        traffic (Optional[list[Dict[str, Any]]]): 流量数据列表。
         top_n (Optional[int]): 重点商品数量。
+        window_days (Optional[int]): 未提供日期时使用的回溯天数。
 
     Returns:
         Dict[str, Any]: 计算后的 KPI 摘要信息。
@@ -577,6 +590,7 @@ def tool_compute_dashboard_metrics(
         sales=sales,
         traffic=traffic,
         top_n=top_n,
+        window_days=window_days,
     )
     return cast(ComputeDashboardMetricsResult, result)
 
