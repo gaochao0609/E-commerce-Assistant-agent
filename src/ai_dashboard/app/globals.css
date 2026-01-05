@@ -100,6 +100,11 @@ main {
   margin-bottom: 16px;
 }
 
+.panel-section {
+  display: grid;
+  gap: 16px;
+}
+
 .tag {
   display: inline-flex;
   align-items: center;
@@ -150,6 +155,11 @@ main {
   resize: vertical;
 }
 
+.button-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .button {
   border: none;
   border-radius: 999px;
@@ -178,6 +188,17 @@ main {
   border: 1px dashed rgba(0, 0, 0, 0.15);
 }
 
+.error-text {
+  color: #b11d1d;
+  font-weight: 600;
+}
+
+.insights-stack {
+  margin-top: 20px;
+  display: grid;
+  gap: 16px;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -188,6 +209,26 @@ main {
   padding: 14px;
   border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.04);
+}
+
+.kpi-label {
+  color: var(--bg-muted);
+  font-size: 0.85rem;
+}
+
+.kpi-value {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.empty-state {
+  color: var(--bg-muted);
+  font-size: 0.9rem;
+}
+
+.table-wrapper,
+.chart-wrapper {
+  padding: 12px 0 0;
 }
 
 .table {
