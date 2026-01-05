@@ -80,17 +80,15 @@ python -m operations_dashboard.mcp_server streamable-http --host 127.0.0.1 --por
 
 ## LangGraph Agent 与 Skill 架构
 
-- `agent.py` 定义了基于 **Skill 抽象** 的 LangGraph 运营分析 Agent：
-  - 每个能力（取数、算指标、生成洞察、历史分析、历史导出、畅销榜查询）都被封装为一个 `Skill`；
-  - Agent 只关心 “调用哪个 Skill、传什么参数”，而不关心底层是本地实现还是通过 MCP 远程调用。
-- `operations_dashboard/skills/` 中提供了通用的 `Skill` 抽象与仪表盘相关的具体实现：
-  - `Skill`：定义统一的 `name` / `description` / `invoke(**kwargs)` 接口，方便映射到 LangChain 工具或 OpenAI/MCP 的 tool 调用；
-  - `dashboard.py`：基于 `ServiceContext` 构建一组运营相关的技能（`fetch_dashboard_data`、`compute_dashboard_metrics` 等）。
-- MCP 模式（`USE_MCP_BRIDGE=1`）下：
-  - Agent 会通过 `mcp_bridge` 将同名工具代理到远程 MCP 服务器；
-  - Skill 仍然可在本地或其他 Agent 容器中复用，但当前对话会优先走 MCP。
-- 本地模式（未设置或关闭 `USE_MCP_BRIDGE`）下：
-  - Agent 直接调用本地 Skill 实现，底层再委托给 `services.py` / `metrics/` / `storage/` 等模块完成具体工作。
+- `agent.py` 现在是一个**纯 MCP 客户端 Agent**：
+  - 所有工具调用（取数、算指标、生成洞察、历史分析、历史导出、畅销榜查询）都通过 `mcp_bridge` 调用远端 MCP 服务器；
+  - 不再直接依赖本地 `services` 或 `skills`，只负责对话和工具调用编排。
+- `operations_dashboard/skills/` 与 `services.py` 只在 **MCP 服务器端** 使用：
+  - `Skill` 抽象定义统一的 `name` / `description` / `invoke(**kwargs)` 接口，用于在服务器端封装能力；
+  - `dashboard.py` 基于 `ServiceContext` 构建一组运营相关技能（`fetch_dashboard_data`、`compute_dashboard_metrics` 等），并在 `mcp_server.py` 中注册为 MCP 工具实现。
+- 架构分层：
+  - **Agent 层**：`agent.py` + `mcp_bridge.py`，作为 MCP 客户端；
+  - **服务器层**：`mcp_server.py` + `skills/` + `services.py` 等，提供实际业务逻辑和数据计算能力。
 
 ## 目录结构
 
