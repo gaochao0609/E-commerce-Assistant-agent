@@ -13,6 +13,7 @@ import { buildCharts, buildKpis } from '../../../lib/metrics.js';
 import { buildSystemPrompt } from '../../../lib/prompt.js';
 import { createReportBuffer } from '../../../lib/reporting.js';
 import { getUpload, saveReport } from '../../../lib/storage.js';
+import { shouldGenerateReport } from '../../../lib/intent.js';
 import { sanitizeMessages } from '../../../lib/validators.js';
 import { logger } from '../../../lib/logger.js';
 
@@ -56,7 +57,7 @@ export async function POST(request) {
       kpis = buildKpis(table);
       charts = buildCharts(table, config.chartType);
 
-      if (table.headers.length > 0) {
+      if (table.headers.length > 0 && shouldGenerateReport(messages)) {
         const reportBuffer = createReportBuffer(table, config.reportFormat);
         report = await saveReport(reportBuffer, config.reportFormat);
       }

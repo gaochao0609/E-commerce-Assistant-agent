@@ -7,7 +7,11 @@
 
 export default function ReportPanel({ report }) {
   if (!report) {
-    return <div className="empty-state">No report generated yet.</div>;
+    return (
+      <div className="empty-state">
+        Ask for a report to generate a downloadable file.
+      </div>
+    );
   }
 
   return (
