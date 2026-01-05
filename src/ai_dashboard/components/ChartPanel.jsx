@@ -28,18 +28,24 @@ ChartJS.register(
   Legend
 );
 
-const buildDataset = (chart) => ({
-  labels: chart.labels,
-  datasets: [
-    {
-      label: chart.title,
-      data: chart.values,
-      backgroundColor: 'rgba(217, 107, 67, 0.6)',
-      borderColor: 'rgba(43, 111, 126, 0.8)',
-      borderWidth: 2
-    }
-  ]
-});
+const buildDataset = (chart) => {
+  const isArea = chart.type === 'area';
+
+  return {
+    labels: chart.labels,
+    datasets: [
+      {
+        label: chart.title,
+        data: chart.values,
+        backgroundColor: isArea ? 'rgba(217, 107, 67, 0.25)' : 'rgba(217, 107, 67, 0.6)',
+        borderColor: 'rgba(43, 111, 126, 0.8)',
+        borderWidth: 2,
+        fill: isArea,
+        tension: 0.3
+      }
+    ]
+  };
+};
 
 export default function ChartPanel({ chart }) {
   if (!chart) {
@@ -54,14 +60,12 @@ export default function ChartPanel({ chart }) {
     }
   };
 
+  const isLine = chart.type === 'line' || chart.type === 'area';
+
   return (
     <div className="chart-wrapper">
       <div className="panel-title">{chart.title}</div>
-      {chart.type === 'line' ? (
-        <Line data={data} options={options} />
-      ) : (
-        <Bar data={data} options={options} />
-      )}
+      {isLine ? <Line data={data} options={options} /> : <Bar data={data} options={options} />}
     </div>
   );
 }
