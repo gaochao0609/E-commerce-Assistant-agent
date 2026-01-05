@@ -4,7 +4,7 @@
  * Flow: reads the first sheet, normalizes headers, and truncates data.
  * Created: 2026-01-05
  */
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx/xlsx.mjs';
 
 const normalizeHeader = (value, index) => {
   const clean = String(value || '').trim();

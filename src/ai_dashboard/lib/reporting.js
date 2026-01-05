@@ -4,7 +4,7 @@
  * Flow: builds a workbook and returns a buffer in the configured format.
  * Created: 2026-01-05
  */
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx/xlsx.mjs';
 
 export const createReportBuffer = (table, format) => {
   if (!table || table.headers.length === 0) {

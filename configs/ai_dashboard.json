@@ -1,4 +1,4 @@
-﻿{
+{
   "appName": "Operations AI Assistant",
   "provider": "openai",
   "model": "gpt-4o-mini",

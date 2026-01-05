@@ -1,5 +1,5 @@
 ﻿/*
- * File: tests/ai_dashboard/e2e/ai-dashboard.spec.js
+ * File: tests/e2e/ai-dashboard.spec.js
  * Purpose: Basic end-to-end checks for the AI dashboard UI.
  * Flow: verifies key UI elements load in the browser.
  * Created: 2026-01-05

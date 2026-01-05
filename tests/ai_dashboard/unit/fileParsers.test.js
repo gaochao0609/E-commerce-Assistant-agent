@@ -5,7 +5,7 @@
  * Created: 2026-01-05
  */
 import { describe, expect, it } from 'vitest';
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx/xlsx.mjs';
 import { parseTableFromBuffer } from 'ai-dashboard/lib/fileParsers.js';
 
 const createWorkbookBuffer = () => {
