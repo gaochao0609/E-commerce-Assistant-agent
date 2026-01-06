@@ -6,6 +6,7 @@
  */
 import { getRuntimeConfig } from '../../../lib/config.js';
 import { parseTableFromBuffer } from '../../../lib/fileParsers.js';
+import { callMcpTool } from '../../../lib/mcpClient.js';
 import { saveUpload } from '../../../lib/storage.js';
 import { validateFile } from '../../../lib/validators.js';
 import { logger } from '../../../lib/logger.js';
@@ -28,14 +29,39 @@ export async function POST(request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const metadata = await saveUpload(buffer, { name: file.name, type: file.type });
     const table = parseTableFromBuffer(buffer, config);
+    const metadata = await saveUpload(buffer, { name: file.name, type: file.type });
+
+    if (!process.env.MCP_SERVER_URL) {
+      return Response.json({
+        uploadId: metadata.id,
+        filename: metadata.filename,
+        rowCount: table.rowCount,
+        columnCount: table.columnCount,
+        createdAt: metadata.createdAt,
+        persisted: false
+      });
+    }
+
+    const persisted = await callMcpTool(
+      process.env.MCP_SERVER_URL,
+      'save_upload_table',
+      {
+        filename: metadata.filename,
+        headers: table.headers,
+        rows: table.rows,
+        row_count: table.rowCount,
+        column_count: table.columnCount
+      }
+    );
 
     return Response.json({
-      uploadId: metadata.id,
-      filename: metadata.filename,
+      uploadId: persisted?.id || metadata.id,
+      filename: persisted?.filename || metadata.filename,
       rowCount: table.rowCount,
-      columnCount: table.columnCount
+      columnCount: table.columnCount,
+      createdAt: persisted?.created_at || metadata.createdAt,
+      persisted: Boolean(persisted)
     });
   } catch (error) {
     logger.error('Upload failed.', error);

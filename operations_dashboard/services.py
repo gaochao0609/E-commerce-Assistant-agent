@@ -610,6 +610,121 @@ def export_dashboard_history(
     }
 
 
+def _get_upload_repository(context: ServiceContext) -> SQLiteRepository:
+    """Return a repository instance for upload persistence."""
+    repository = context.repository or SQLiteRepository(context.config.storage.db_path)
+    repository.initialize()
+    return repository
+
+
+def save_upload_table(
+    context: ServiceContext,
+    *,
+    filename: str,
+    headers: List[str],
+    rows: List[List[str]],
+    row_count: int,
+    column_count: int,
+) -> Dict[str, Any]:
+    """
+    功能说明:
+        持久化保存上传的表格数据。
+    参数:
+        context (ServiceContext): 服务上下文。
+        filename (str): 原始文件名。
+        headers (List[str]): 表头字段列表。
+        rows (List[List[str]]): 表格数据行。
+        row_count (int): 行数统计。
+        column_count (int): 列数统计。
+    返回:
+        Dict[str, Any]: 上传记录摘要。
+    """
+    repository = _get_upload_repository(context)
+    record = repository.save_upload(
+        filename=filename,
+        headers=headers,
+        rows=rows,
+        row_count=row_count,
+        column_count=column_count,
+    )
+    return {
+        "id": record.id,
+        "filename": record.filename,
+        "row_count": record.row_count,
+        "column_count": record.column_count,
+        "created_at": record.created_at,
+    }
+
+
+def get_upload_table(
+    context: ServiceContext,
+    *,
+    upload_id: str,
+) -> Dict[str, Any]:
+    """
+    功能说明:
+        获取指定上传记录的表格内容。
+    参数:
+        context (ServiceContext): 服务上下文。
+        upload_id (str): 上传记录 ID。
+    返回:
+        Dict[str, Any]: 包含表格明细的记录。
+    """
+    repository = _get_upload_repository(context)
+    record = repository.fetch_upload(upload_id)
+    if record is None:
+        raise RuntimeError("Upload record not found.")
+    return {
+        "id": record.id,
+        "filename": record.filename,
+        "headers": record.headers,
+        "rows": record.rows,
+        "row_count": record.row_count,
+        "column_count": record.column_count,
+        "created_at": record.created_at,
+    }
+
+
+def list_upload_tables(
+    context: ServiceContext,
+    *,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """
+    功能说明:
+        获取最近上传记录列表。
+    参数:
+        context (ServiceContext): 服务上下文。
+        limit (int): 返回记录数量。
+    返回:
+        Dict[str, Any]: 上传记录列表。
+    """
+    repository = _get_upload_repository(context)
+    uploads = repository.fetch_recent_uploads(limit=limit)
+    return {"uploads": uploads}
+
+
+def delete_upload_table(
+    context: ServiceContext,
+    *,
+    upload_id: str,
+) -> Dict[str, Any]:
+    """
+    功能说明:
+        删除指定上传记录。
+    参数:
+        context (ServiceContext): 服务上下文。
+        upload_id (str): 上传记录 ID。
+    返回:
+        Dict[str, Any]: 删除结果。
+    """
+    repository = _get_upload_repository(context)
+    deleted = repository.delete_upload(upload_id)
+    if not deleted:
+        raise RuntimeError("Upload record not found.")
+    return {"deleted": True}
+
+
 def amazon_bestseller_search(
     context: ServiceContext,
     *,

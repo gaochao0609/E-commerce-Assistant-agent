@@ -1,4 +1,4 @@
-"""Skill 抽象与具体技能实现的统一入口。
+﻿"""Skill 抽象与具体技能实现的统一入口。
 
 当前项目将所有对外暴露的“能力”（如取数、算指标、生成洞察、历史分析、
 导出 CSV、畅销榜查询等）抽象为 Skill，便于：
@@ -9,12 +9,16 @@
 
 from .base import Skill
 from .dashboard import (
-    FetchDashboardDataSkill,
-    ComputeDashboardMetricsSkill,
-    GenerateDashboardInsightsSkill,
-    AnalyzeDashboardHistorySkill,
-    ExportDashboardHistorySkill,
     AmazonBestsellerSearchSkill,
+    AnalyzeDashboardHistorySkill,
+    ComputeDashboardMetricsSkill,
+    DeleteUploadTableSkill,
+    ExportDashboardHistorySkill,
+    FetchDashboardDataSkill,
+    GenerateDashboardInsightsSkill,
+    GetUploadTableSkill,
+    ListUploadTablesSkill,
+    SaveUploadTableSkill,
     build_dashboard_skills,
 )
 
@@ -26,6 +30,9 @@ __all__ = [
     "AnalyzeDashboardHistorySkill",
     "ExportDashboardHistorySkill",
     "AmazonBestsellerSearchSkill",
+    "SaveUploadTableSkill",
+    "GetUploadTableSkill",
+    "ListUploadTablesSkill",
+    "DeleteUploadTableSkill",
     "build_dashboard_skills",
 ]
-

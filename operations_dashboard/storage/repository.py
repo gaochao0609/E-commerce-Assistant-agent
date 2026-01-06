@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -69,6 +71,30 @@ class StoredSummary:
     products: List[StoredProduct]
 
 
+@dataclass
+class StoredUpload:
+    """
+    表示持久化保存的上传表格数据。
+
+    属性:
+        id (str): 上传记录 ID。
+        filename (str): 原始文件名。
+        headers (List[str]): 表头字段列表。
+        rows (List[List[str]]): 表格数据行。
+        row_count (int): 行数统计。
+        column_count (int): 列数统计。
+        created_at (str): 创建时间。
+    """
+
+    id: str
+    filename: str
+    headers: List[str]
+    rows: List[List[str]]
+    row_count: int
+    column_count: int
+    created_at: str
+
+
 class SQLiteRepository:
     """
     为仪表盘摘要提供基于 SQLite 的持久化能力。
@@ -117,6 +143,16 @@ class SQLiteRepository:
                     buy_box_percentage REAL,
                     UNIQUE(summary_id, asin),
                     FOREIGN KEY(summary_id) REFERENCES summaries(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS uploads (
+                    id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    headers_json TEXT NOT NULL,
+                    rows_json TEXT NOT NULL,
+                    row_count INTEGER NOT NULL,
+                    column_count INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
                 );
                 """
             )
@@ -279,3 +315,140 @@ class SQLiteRepository:
             (summary_id,),
         )
         return [StoredProduct(*row) for row in product_rows]
+
+    def save_upload(
+        self,
+        *,
+        filename: str,
+        headers: List[str],
+        rows: List[List[str]],
+        row_count: int,
+        column_count: int,
+    ) -> StoredUpload:
+        """
+        功能说明:
+            持久化保存上传表格数据。
+        参数:
+            filename (str): 原始文件名。
+            headers (List[str]): 表头字段列表。
+            rows (List[List[str]]): 表格数据行。
+            row_count (int): 行数统计。
+            column_count (int): 列数统计。
+        返回:
+            StoredUpload: 保存后的上传记录。
+        """
+        created_at = datetime.utcnow().isoformat(timespec="seconds")
+        upload_id = uuid4().hex
+        headers_json = json.dumps(headers, ensure_ascii=False)
+        rows_json = json.dumps(rows, ensure_ascii=False)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO uploads (
+                    id, filename, headers_json, rows_json,
+                    row_count, column_count, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    upload_id,
+                    filename,
+                    headers_json,
+                    rows_json,
+                    row_count,
+                    column_count,
+                    created_at,
+                ),
+            )
+        return StoredUpload(
+            id=upload_id,
+            filename=filename,
+            headers=headers,
+            rows=rows,
+            row_count=row_count,
+            column_count=column_count,
+            created_at=created_at,
+        )
+
+    def fetch_upload(self, upload_id: str) -> Optional[StoredUpload]:
+        """
+        功能说明:
+            获取指定 ID 的上传表格记录。
+        参数:
+            upload_id (str): 上传记录 ID。
+        返回:
+            Optional[StoredUpload]: 找到则返回记录，否则为 None。
+        """
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT * FROM uploads
+                WHERE id = ?
+                """,
+                (upload_id,),
+            ).fetchone()
+            if not row:
+                return None
+            headers = json.loads(row["headers_json"]) if row["headers_json"] else []
+            rows = json.loads(row["rows_json"]) if row["rows_json"] else []
+            return StoredUpload(
+                id=row["id"],
+                filename=row["filename"],
+                headers=headers,
+                rows=rows,
+                row_count=row["row_count"],
+                column_count=row["column_count"],
+                created_at=row["created_at"],
+            )
+
+    def fetch_recent_uploads(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        功能说明:
+            获取最近上传记录列表（不包含表格明细）。
+        参数:
+            limit (int): 返回的最大记录数。
+        返回:
+            List[Dict[str, Any]]: 上传记录摘要列表。
+        """
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = list(
+                conn.execute(
+                    """
+                    SELECT id, filename, row_count, column_count, created_at
+                    FROM uploads
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "filename": row["filename"],
+                    "row_count": row["row_count"],
+                    "column_count": row["column_count"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+
+    def delete_upload(self, upload_id: str) -> bool:
+        """
+        功能说明:
+            删除指定上传记录。
+        参数:
+            upload_id (str): 上传记录 ID。
+        返回:
+            bool: 是否成功删除。
+        """
+        with sqlite3.connect(self._db_path) as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM uploads
+                WHERE id = ?
+                """,
+                (upload_id,),
+            )
+            return cursor.rowcount > 0

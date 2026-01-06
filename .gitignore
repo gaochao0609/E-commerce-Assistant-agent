@@ -1,6 +1,7 @@
 ﻿__pycache__/
 *.py[cod]
 *.sqlite
+*.sqlite3
 .env
 .env.local
 .next

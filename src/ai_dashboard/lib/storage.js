@@ -69,6 +69,18 @@ const writeMetadata = async (dir, id, metadata) => {
   await fs.writeFile(metaPath, JSON.stringify(metadata, null, 2));
 };
 
+const removeMetadata = async (dir, id) => {
+  const metaPath = path.join(dir, `${id}.json`);
+  if (!isWithinDir(dir, metaPath)) {
+    return;
+  }
+  try {
+    await fs.unlink(metaPath);
+  } catch {
+    // Ignore cleanup errors to avoid masking the original issue.
+  }
+};
+
 const readMetadata = async (dir, id) => {
   if (!isValidId(id)) {
     return null;
@@ -88,6 +100,23 @@ const readMetadata = async (dir, id) => {
   } catch {
     return null;
   }
+};
+
+const ensureFileExists = async (dir, metadata) => {
+  if (!metadata || !metadata.filePath) {
+    return null;
+  }
+  if (!isWithinDir(dir, metadata.filePath)) {
+    await removeMetadata(dir, metadata.id);
+    return null;
+  }
+  try {
+    await fs.stat(metadata.filePath);
+  } catch {
+    await removeMetadata(dir, metadata.id);
+    return null;
+  }
+  return metadata;
 };
 
 export const saveUpload = async (buffer, file) => {
@@ -116,13 +145,7 @@ export const saveUpload = async (buffer, file) => {
 
 export const getUpload = async (id) => {
   const metadata = await readMetadata(UPLOAD_DIR, id);
-  if (!metadata) {
-    return null;
-  }
-  if (!isWithinDir(UPLOAD_DIR, metadata.filePath || '')) {
-    return null;
-  }
-  return metadata;
+  return await ensureFileExists(UPLOAD_DIR, metadata);
 };
 
 export const saveReport = async (buffer, format) => {
@@ -153,11 +176,5 @@ export const saveReport = async (buffer, format) => {
 
 export const getReport = async (id) => {
   const metadata = await readMetadata(REPORT_DIR, id);
-  if (!metadata) {
-    return null;
-  }
-  if (!isWithinDir(REPORT_DIR, metadata.filePath || '')) {
-    return null;
-  }
-  return metadata;
+  return await ensureFileExists(REPORT_DIR, metadata);
 };

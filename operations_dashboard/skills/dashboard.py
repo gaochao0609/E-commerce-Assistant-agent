@@ -1,4 +1,4 @@
-"""围绕运营仪表盘场景的具体 Skill 实现。
+﻿"""围绕运营仪表盘场景的具体 Skill 实现。
 
 这些 Skill 主要是对 ``services`` 层的业务逻辑进行二次封装，使其：
 - 以统一的 Skill 接口暴露给 Agent / MCP；
@@ -16,9 +16,13 @@ from ..services import (
     analyze_dashboard_history,
     amazon_bestseller_search,
     compute_dashboard_metrics,
+    delete_upload_table,
     export_dashboard_history,
     fetch_dashboard_data,
     generate_dashboard_insights,
+    get_upload_table,
+    list_upload_tables,
+    save_upload_table,
 )
 
 
@@ -235,6 +239,97 @@ class AmazonBestsellerSearchSkill(_ContextBoundSkill):
         )
 
 
+@dataclass
+class SaveUploadTableSkill(_ContextBoundSkill):
+    """保存上传表格数据到 SQLite。"""
+
+    def __init__(self, context: ServiceContext) -> None:
+        super().__init__(
+            name="save_upload_table",
+            description="保存上传的表格数据到 SQLite，便于后续复用。",
+            context=context,
+        )
+
+    def invoke(
+        self,
+        *,
+        filename: str,
+        headers: List[str],
+        rows: List[List[str]],
+        row_count: int,
+        column_count: int,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        return save_upload_table(
+            self.context,
+            filename=filename,
+            headers=headers,
+            rows=rows,
+            row_count=row_count,
+            column_count=column_count,
+        )
+
+
+@dataclass
+class GetUploadTableSkill(_ContextBoundSkill):
+    """获取指定上传记录的表格内容。"""
+
+    def __init__(self, context: ServiceContext) -> None:
+        super().__init__(
+            name="get_upload_table",
+            description="获取指定上传记录的表格明细。",
+            context=context,
+        )
+
+    def invoke(
+        self,
+        *,
+        upload_id: str,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        return get_upload_table(self.context, upload_id=upload_id)
+
+
+@dataclass
+class ListUploadTablesSkill(_ContextBoundSkill):
+    """列出最近上传记录。"""
+
+    def __init__(self, context: ServiceContext) -> None:
+        super().__init__(
+            name="list_upload_tables",
+            description="列出最近上传的表格记录。",
+            context=context,
+        )
+
+    def invoke(
+        self,
+        *,
+        limit: int = 20,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        return list_upload_tables(self.context, limit=limit)
+
+
+@dataclass
+class DeleteUploadTableSkill(_ContextBoundSkill):
+    """删除上传记录。"""
+
+    def __init__(self, context: ServiceContext) -> None:
+        super().__init__(
+            name="delete_upload_table",
+            description="删除指定上传记录。",
+            context=context,
+        )
+
+    def invoke(
+        self,
+        *,
+        upload_id: str,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        return delete_upload_table(self.context, upload_id=upload_id)
+
+
 def build_dashboard_skills(context: ServiceContext) -> List[Skill]:
     """基于给定的 ``ServiceContext`` 构建本项目所有核心技能列表。"""
     return [
@@ -244,5 +339,8 @@ def build_dashboard_skills(context: ServiceContext) -> List[Skill]:
         AnalyzeDashboardHistorySkill(context),
         ExportDashboardHistorySkill(context),
         AmazonBestsellerSearchSkill(context),
+        SaveUploadTableSkill(context),
+        GetUploadTableSkill(context),
+        ListUploadTablesSkill(context),
+        DeleteUploadTableSkill(context),
     ]
-

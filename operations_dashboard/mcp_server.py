@@ -147,6 +147,45 @@ class AmazonBestsellerSearchResult(TypedDict):
     items: List[BestsellerItemPayload]
 
 
+class UploadTableSummaryPayload(TypedDict):
+    id: str
+    filename: str
+    row_count: int
+    column_count: int
+    created_at: str
+
+
+class UploadTablePayload(UploadTableSummaryPayload):
+    headers: List[str]
+    rows: List[List[str]]
+
+
+class SaveUploadTableResult(TypedDict):
+    id: str
+    filename: str
+    row_count: int
+    column_count: int
+    created_at: str
+
+
+class GetUploadTableResult(TypedDict):
+    id: str
+    filename: str
+    headers: List[str]
+    rows: List[List[str]]
+    row_count: int
+    column_count: int
+    created_at: str
+
+
+class ListUploadTablesResult(TypedDict):
+    uploads: List[UploadTableSummaryPayload]
+
+
+class DeleteUploadTableResult(TypedDict):
+    deleted: bool
+
+
 class DashboardAppContext:
     """封装 MCP 生命周期中共享的业务依赖与技能索引。
 
@@ -231,6 +270,8 @@ mcp = FastMCP(
     ),
     lifespan=app_lifespan,
     streamable_http_path="/mcp",
+    json_response=True,
+    stateless_http=True,
 )
 
 _original_streamable_http_app = mcp.streamable_http_app
@@ -553,6 +594,64 @@ def tool_amazon_bestseller_search(
         max_items=max_items,
     )
     return cast(AmazonBestsellerSearchResult, result)
+
+
+@mcp.tool(name="save_upload_table")
+def tool_save_upload_table(
+    ctx: Context,
+    filename: str,
+    headers: List[str],
+    rows: List[List[str]],
+    row_count: int,
+    column_count: int,
+) -> SaveUploadTableResult:
+    """保存上传的表格数据到 SQLite。"""
+
+    skill = _skills(ctx)["save_upload_table"]
+    result = skill.invoke(
+        filename=filename,
+        headers=headers,
+        rows=rows,
+        row_count=row_count,
+        column_count=column_count,
+    )
+    return cast(SaveUploadTableResult, result)
+
+
+@mcp.tool(name="get_upload_table")
+def tool_get_upload_table(
+    ctx: Context,
+    upload_id: str,
+) -> GetUploadTableResult:
+    """获取指定上传记录的表格明细。"""
+
+    skill = _skills(ctx)["get_upload_table"]
+    result = skill.invoke(upload_id=upload_id)
+    return cast(GetUploadTableResult, result)
+
+
+@mcp.tool(name="list_upload_tables")
+def tool_list_upload_tables(
+    ctx: Context,
+    limit: int = 20,
+) -> ListUploadTablesResult:
+    """列出最近上传记录。"""
+
+    skill = _skills(ctx)["list_upload_tables"]
+    result = skill.invoke(limit=limit)
+    return cast(ListUploadTablesResult, result)
+
+
+@mcp.tool(name="delete_upload_table")
+def tool_delete_upload_table(
+    ctx: Context,
+    upload_id: str,
+) -> DeleteUploadTableResult:
+    """删除指定上传记录。"""
+
+    skill = _skills(ctx)["delete_upload_table"]
+    result = skill.invoke(upload_id=upload_id)
+    return cast(DeleteUploadTableResult, result)
 
 
 @mcp.tool(name="compute_dashboard_metrics")
