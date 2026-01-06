@@ -19,7 +19,7 @@ export async function POST(request) {
     const file = formData.get('file');
 
     if (!file || typeof file.arrayBuffer !== 'function') {
-      return Response.json({ error: 'File is required.' }, { status: 400 });
+      return Response.json({ error: '请上传文件。' }, { status: 400 });
     }
 
     const validationError = validateFile(file, config);
@@ -39,6 +39,6 @@ export async function POST(request) {
     });
   } catch (error) {
     logger.error('Upload failed.', error);
-    return Response.json({ error: 'Upload failed.' }, { status: 500 });
+    return Response.json({ error: '上传失败。' }, { status: 500 });
   }
 }

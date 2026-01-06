@@ -20,13 +20,13 @@ const fraunces = Fraunces({
 });
 
 export const metadata = {
-  title: 'Operations AI Assistant',
-  description: 'Internal operations assistant for metrics and reports.'
+  title: '运维 AI 助手',
+  description: '用于内部运维的指标查询与报告助手。'
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${spaceGrotesk.variable} ${fraunces.variable}`}>
+    <html lang="zh-CN" className={`${spaceGrotesk.variable} ${fraunces.variable}`}>
       <body>
         {children}
       </body>

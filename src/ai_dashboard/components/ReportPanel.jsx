@@ -9,7 +9,7 @@ export default function ReportPanel({ report }) {
   if (!report) {
     return (
       <div className="empty-state">
-        Ask for a report to generate a downloadable file.
+        请在对话中请求生成报告。
       </div>
     );
   }
@@ -17,10 +17,10 @@ export default function ReportPanel({ report }) {
   return (
     <div className="download-card">
       <div>
-        <strong>Report ready:</strong> {report.filename}
+        <strong>报告已生成:</strong> {report.filename}
       </div>
       <a className="button secondary" href={`/api/report/${report.id}`}>
-        Download report
+        下载报告
       </a>
     </div>
   );

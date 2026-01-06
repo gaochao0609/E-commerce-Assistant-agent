@@ -14,7 +14,7 @@ export const createReportBuffer = (table, format) => {
   const data = [table.headers, ...table.rows];
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+  XLSX.utils.book_append_sheet(workbook, worksheet, '报告');
 
   if (format === 'csv') {
     const csv = XLSX.write(workbook, { bookType: 'csv', type: 'string' });

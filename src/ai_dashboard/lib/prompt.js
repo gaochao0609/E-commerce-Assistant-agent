@@ -5,26 +5,33 @@
  * Created: 2026-01-05
  */
 
+import { formatMcpSummary } from './mcpMapper.js';
+
 const summarizeTable = (table) => {
   if (!table || table.headers.length === 0) {
-    return 'No table data is available.';
+    return '当前没有可用的表格数据。';
   }
 
   const sampleRows = table.rows.slice(0, 3).map((row) => row.join(' | '));
 
   return [
-    `Headers: ${table.headers.join(', ')}`,
-    `Row count: ${table.rowCount}`,
-    `Sample rows: ${sampleRows.join(' || ')}`
+    `表头: ${table.headers.join(', ')}`,
+    `行数: ${table.rowCount}`,
+    `示例行: ${sampleRows.join(' || ')}`
   ].join(' ');
 };
 
-export const buildSystemPrompt = (config, table, kpis) => {
-  const kpiSummary = Array.isArray(kpis) && kpis.length > 0
-    ? `KPIs: ${kpis.map((kpi) => `${kpi.label}: ${kpi.value}`).join(', ')}.`
-    : 'No KPI summary available.';
+export const buildSystemPrompt = (config, table, kpis, mcpReport) => {
+  const kpiSummary =
+    Array.isArray(kpis) && kpis.length > 0
+      ? `指标: ${kpis.map((kpi) => `${kpi.label}: ${kpi.value}`).join(', ')}。`
+      : '当前没有可用的指标摘要。';
 
   const tableSummary = summarizeTable(table);
+  const mcpSummary = mcpReport?.summary ? formatMcpSummary(mcpReport.summary) : '';
+  const mcpInsights = mcpReport?.insights ? `MCP 洞察: ${mcpReport.insights}` : '';
 
-  return `${config.systemPrompt}\n${kpiSummary}\n${tableSummary}`;
+  return [config.systemPrompt, kpiSummary, tableSummary, mcpSummary, mcpInsights]
+    .filter(Boolean)
+    .join('\n');
 };

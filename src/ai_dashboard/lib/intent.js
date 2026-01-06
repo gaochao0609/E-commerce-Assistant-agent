@@ -5,7 +5,16 @@
  * Created: 2026-01-05
  */
 
-const REPORT_KEYWORDS = ['report', 'download', 'export', 'csv', 'xlsx'];
+const REPORT_KEYWORDS = [
+  'report',
+  'download',
+  'export',
+  'csv',
+  'xlsx',
+  '报告',
+  '下载',
+  '导出'
+];
 
 export const shouldGenerateReport = (messages) => {
   if (!Array.isArray(messages)) {

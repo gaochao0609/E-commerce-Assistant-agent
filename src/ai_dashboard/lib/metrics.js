@@ -22,10 +22,10 @@ export const buildKpis = (table) => {
   const total = numericValues.reduce((sum, value) => sum + value, 0);
 
   return [
-    { label: 'Rows', value: table.rowCount },
-    { label: 'Columns', value: table.columnCount },
-    { label: 'Numeric Cells', value: numericValues.length },
-    { label: 'Numeric Sum', value: total.toFixed(2) }
+    { label: '行数', value: table.rowCount },
+    { label: '列数', value: table.columnCount },
+    { label: '数值单元格', value: numericValues.length },
+    { label: '数值合计', value: total.toFixed(2) }
   ];
 };
 
@@ -53,7 +53,7 @@ export const buildCharts = (table, chartType) => {
 
   return [
     {
-      title: `${table.headers[1]} by ${table.headers[0]}`,
+      title: `按 ${table.headers[0]} 统计的 ${table.headers[1]}`,
       type: chartType,
       labels,
       values

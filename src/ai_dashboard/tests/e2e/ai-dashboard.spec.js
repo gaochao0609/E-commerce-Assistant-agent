@@ -12,9 +12,9 @@ test.describe('AI dashboard', () => {
   test('loads the main interface', async ({ page }) => {
     await page.goto('/');
     await expect(
-      page.getByRole('heading', { name: 'Operations AI Assistant' })
+      page.getByRole('heading', { name: '运维 AI 助手' })
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send request' })).toBeVisible();
-    await expect(page.getByText('Data Upload')).toBeVisible();
+    await expect(page.getByRole('button', { name: '发送请求' })).toBeVisible();
+    await expect(page.getByText('数据上传')).toBeVisible();
   });
 });

@@ -241,7 +241,12 @@ class _MCPBridge:
         future: Future = Future()
         request = _Request(kind=kind, payload=payload, future=future)
         asyncio.run_coroutine_threadsafe(self._queue.put(request), self._loop).result()
-        return future.result()
+        try:
+            return future.result(timeout=DEFAULT_REQUEST_TIMEOUT)
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"MCP bridge request timed out after {DEFAULT_REQUEST_TIMEOUT}s."
+            ) from exc
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         return self._submit("call_tool", {"name": tool_name, "args": arguments})
@@ -265,6 +270,17 @@ class _MCPBridge:
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
 
+
+def _default_request_timeout() -> float:
+    raw = os.getenv("MCP_BRIDGE_TIMEOUT", "30")
+    try:
+        value = float(raw)
+    except ValueError:
+        return 30.0
+    return value if value > 0 else 30.0
+
+
+DEFAULT_REQUEST_TIMEOUT = _default_request_timeout()
 
 _BRIDGE_LOCK = threading.Lock()
 _BRIDGE: Optional[_MCPBridge] = None

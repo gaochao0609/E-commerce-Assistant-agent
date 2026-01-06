@@ -36,11 +36,13 @@ class AmazonCredentialConfig:
         secret_key = os.getenv(f"{prefix}SECRET_KEY", "")
         associate_tag = os.getenv(f"{prefix}ASSOCIATE_TAG")
         marketplace = os.getenv(f"{prefix}MARKETPLACE", "US")
-        # 校验核心凭证是否存在，缺失则提醒用户配置。
+        # 凭证缺失时自动回退到 mock，避免阻断仅使用本地/模拟数据的场景。
         if not access_key or not secret_key:
-            raise RuntimeError(
-                "Amazon API credentials are missing."
-                f" Set {prefix}ACCESS_KEY and {prefix}SECRET_KEY."
+            return cls(
+                access_key="mock",
+                secret_key="mock",
+                associate_tag=associate_tag,
+                marketplace=marketplace,
             )
         return cls(
             access_key=access_key,

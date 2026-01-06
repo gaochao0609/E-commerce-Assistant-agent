@@ -7,7 +7,7 @@
 
 export default function TablePanel({ table }) {
   if (!table) {
-    return <div className="empty-state">No table preview yet.</div>;
+    return <div className="empty-state">暂无表格预览。</div>;
   }
 
   return (

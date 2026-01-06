@@ -14,7 +14,7 @@ export async function GET(_request, { params }) {
   try {
     const report = await getReport(params.id);
     if (!report) {
-      return new Response('Report not found.', { status: 404 });
+      return new Response('报告不存在。', { status: 404 });
     }
 
     const fileBuffer = await fs.readFile(report.filePath);
@@ -27,6 +27,6 @@ export async function GET(_request, { params }) {
     });
   } catch (error) {
     logger.error('Report download failed.', error);
-    return new Response('Report download failed.', { status: 500 });
+    return new Response('报告下载失败。', { status: 500 });
   }
 }

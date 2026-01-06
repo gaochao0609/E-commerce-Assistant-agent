@@ -16,7 +16,7 @@ const initialMessages = [
   {
     role: 'assistant',
     content:
-      'Share a metric question or upload a spreadsheet. I will summarize KPIs, charts, and prepare a report.'
+      '可以提指标问题或上传表格。我会汇总指标与图表，并准备报告。'
   }
 ];
 
@@ -73,9 +73,9 @@ export default function Dashboard() {
     <main>
       <div className="app-shell">
         <header className="header">
-          <span className="tag">Internal Ops</span>
-          <h1>Operations AI Assistant</h1>
-          <p>Ask for metrics, upload spreadsheets, and generate reports.</p>
+          <span className="tag">内部运维</span>
+          <h1>运维 AI 助手</h1>
+          <p>对话查询指标，上传表格，生成报告。</p>
         </header>
         <section className="dashboard-grid">
           <div className="panel fade-in">

@@ -7,7 +7,7 @@
 
 export default function KpiPanel({ kpis }) {
   if (!kpis || kpis.length === 0) {
-    return <div className="empty-state">No KPIs available yet.</div>;
+    return <div className="empty-state">暂无指标数据。</div>;
   }
 
   return (

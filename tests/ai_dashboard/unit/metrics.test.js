@@ -20,8 +20,8 @@ const table = {
 describe('buildKpis', () => {
   it('produces KPI values from numeric cells', () => {
     const kpis = buildKpis(table);
-    const rowKpi = kpis.find((kpi) => kpi.label === 'Rows');
-    const sumKpi = kpis.find((kpi) => kpi.label === 'Numeric Sum');
+    const rowKpi = kpis.find((kpi) => kpi.label === '行数');
+    const sumKpi = kpis.find((kpi) => kpi.label === '数值合计');
 
     expect(rowKpi.value).toBe(2);
     expect(sumKpi.value).toBe('30.00');

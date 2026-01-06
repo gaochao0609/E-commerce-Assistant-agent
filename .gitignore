@@ -2,3 +2,7 @@
 *.py[cod]
 *.sqlite
 .env
+.env.local
+.next
+node_modules
+package.json

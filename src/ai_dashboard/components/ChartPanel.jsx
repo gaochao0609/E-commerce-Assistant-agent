@@ -49,7 +49,7 @@ const buildDataset = (chart) => {
 
 export default function ChartPanel({ chart }) {
   if (!chart) {
-    return <div className="empty-state">No chart data yet.</div>;
+    return <div className="empty-state">暂无图表数据。</div>;
   }
 
   const data = buildDataset(chart);

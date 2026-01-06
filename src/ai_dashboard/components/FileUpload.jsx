@@ -24,7 +24,7 @@ export default function FileUpload({ uploadMeta, uploadError, isUploading, onUpl
   return (
     <div className="panel-section">
       <div className="panel-title">
-        <span>Data Upload</span>
+        <span>数据上传</span>
         <span className="tag">Excel/CSV</span>
       </div>
       <div className="file-card">
@@ -32,16 +32,16 @@ export default function FileUpload({ uploadMeta, uploadError, isUploading, onUpl
           ref={inputRef}
           type="file"
           accept=".xlsx,.xls,.csv"
-          aria-label="Data upload file"
+          aria-label="上传数据文件"
           onChange={handleChange}
           disabled={isUploading}
         />
-        <p>{isUploading ? 'Uploading file...' : 'Choose a spreadsheet to add context.'}</p>
+        <p>{isUploading ? '正在上传文件...' : '选择表格文件作为上下文。'}</p>
         {uploadMeta ? (
           <div>
             <strong>{uploadMeta.filename}</strong>
             <div>
-              Rows: {uploadMeta.rowCount} | Columns: {uploadMeta.columnCount}
+              行数: {uploadMeta.rowCount} | 列数: {uploadMeta.columnCount}
             </div>
           </div>
         ) : null}

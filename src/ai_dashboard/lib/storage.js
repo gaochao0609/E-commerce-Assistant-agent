@@ -11,6 +11,9 @@ import crypto from 'crypto';
 
 const UPLOAD_DIR = path.join(os.tmpdir(), 'ai-dashboard-uploads');
 const REPORT_DIR = path.join(os.tmpdir(), 'ai-dashboard-reports');
+const UPLOAD_TTL_HOURS = Number(process.env.AI_DASHBOARD_UPLOAD_TTL_HOURS || 24);
+const REPORT_TTL_HOURS = Number(process.env.AI_DASHBOARD_REPORT_TTL_HOURS || 168);
+const ID_PATTERN = /^[0-9a-fA-F-]{36}$/;
 
 const ensureDir = async (dir) => {
   await fs.mkdir(dir, { recursive: true });
@@ -20,23 +23,76 @@ const safeName = (name) => {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 };
 
+const isValidId = (id) => {
+  return typeof id === 'string' && ID_PATTERN.test(id);
+};
+
+const isWithinDir = (dir, targetPath) => {
+  const resolvedDir = path.resolve(dir);
+  const resolvedTarget = path.resolve(targetPath);
+  return resolvedTarget === resolvedDir || resolvedTarget.startsWith(`${resolvedDir}${path.sep}`);
+};
+
+const cleanupDir = async (dir, maxAgeHours) => {
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours <= 0) {
+    return;
+  }
+
+  const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+  const now = Date.now();
+
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isFile()) {
+          return;
+        }
+        const filePath = path.join(dir, entry.name);
+        try {
+          const stat = await fs.stat(filePath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            await fs.unlink(filePath);
+          }
+        } catch {
+          // Ignore cleanup errors to avoid breaking uploads.
+        }
+      })
+    );
+  } catch {
+    // Ignore cleanup errors to avoid breaking uploads.
+  }
+};
+
 const writeMetadata = async (dir, id, metadata) => {
   const metaPath = path.join(dir, `${id}.json`);
   await fs.writeFile(metaPath, JSON.stringify(metadata, null, 2));
 };
 
 const readMetadata = async (dir, id) => {
+  if (!isValidId(id)) {
+    return null;
+  }
+
   const metaPath = path.join(dir, `${id}.json`);
+  if (!isWithinDir(dir, metaPath)) {
+    return null;
+  }
   try {
     const raw = await fs.readFile(metaPath, 'utf-8');
-    return JSON.parse(raw);
-  } catch (error) {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.id !== id) {
+      return null;
+    }
+    return parsed;
+  } catch {
     return null;
   }
 };
 
 export const saveUpload = async (buffer, file) => {
   await ensureDir(UPLOAD_DIR);
+  await cleanupDir(UPLOAD_DIR, UPLOAD_TTL_HOURS);
   const id = crypto.randomUUID();
   const filename = safeName(file.name || 'upload');
   const extension = path.extname(filename) || '.bin';
@@ -63,11 +119,15 @@ export const getUpload = async (id) => {
   if (!metadata) {
     return null;
   }
+  if (!isWithinDir(UPLOAD_DIR, metadata.filePath || '')) {
+    return null;
+  }
   return metadata;
 };
 
 export const saveReport = async (buffer, format) => {
   await ensureDir(REPORT_DIR);
+  await cleanupDir(REPORT_DIR, REPORT_TTL_HOURS);
   const id = crypto.randomUUID();
   const extension = format === 'csv' ? '.csv' : '.xlsx';
   const filename = `report-${id}${extension}`;
@@ -94,6 +154,9 @@ export const saveReport = async (buffer, format) => {
 export const getReport = async (id) => {
   const metadata = await readMetadata(REPORT_DIR, id);
   if (!metadata) {
+    return null;
+  }
+  if (!isWithinDir(REPORT_DIR, metadata.filePath || '')) {
     return null;
   }
   return metadata;

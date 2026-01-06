@@ -20,7 +20,9 @@ const ConfigSchema = z.object({
   reportFormat: z.enum(['xlsx', 'csv']),
   chartType: z.enum(['bar', 'line', 'area']).default('bar'),
   allowedFileTypes: z.array(z.string()).min(1),
-  systemPrompt: z.string().min(1)
+  systemPrompt: z.string().min(1),
+  mcpWindowDays: z.number().int().positive().default(7),
+  mcpTopN: z.number().int().positive().default(5)
 });
 
 let cachedConfig;

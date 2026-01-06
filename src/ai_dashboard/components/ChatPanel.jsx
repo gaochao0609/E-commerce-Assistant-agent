@@ -20,23 +20,23 @@ export default function ChatPanel({ messages, input, onInputChange, onSubmit, is
   return (
     <div className="panel-section">
       <div className="panel-title">
-        <span>Conversation</span>
-        <span className="tag">Streaming</span>
+        <span>对话</span>
+        <span className="tag">流式</span>
       </div>
       <div className="chat-window">
         {visibleMessages.length === 0
-          ? 'Start a conversation to see responses here.'
+          ? '开始对话后将在此显示回复。'
           : visibleMessages.map(renderMessage)}
       </div>
       <form className="input-row" onSubmit={onSubmit}>
         <textarea
-          placeholder="Ask for KPIs, a report, or a chart."
+          placeholder="请输入指标、报告或图表需求。"
           value={input}
           onChange={onInputChange}
         />
         <div className="button-row">
           <button className="button" type="submit" disabled={isLoading}>
-            {isLoading ? 'Working...' : 'Send request'}
+            {isLoading ? '处理中...' : '发送请求'}
           </button>
         </div>
       </form>

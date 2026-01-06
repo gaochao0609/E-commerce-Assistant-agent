@@ -15,7 +15,7 @@ export default function InsightsPanel({ kpis, tables, charts, report }) {
 
   return (
     <div className="insights-stack">
-      <div className="panel-title">Insights</div>
+      <div className="panel-title">洞察</div>
       <KpiPanel kpis={kpis} />
       <TablePanel table={table} />
       <ChartPanel chart={chart} />

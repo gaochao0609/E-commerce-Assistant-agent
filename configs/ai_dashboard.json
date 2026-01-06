@@ -1,17 +1,19 @@
 {
-  "appName": "Operations AI Assistant",
+  "appName": "运维 AI 助手",
   "provider": "openai",
-  "model": "gpt-4o-mini",
+  "model": "gpt-5-mini",
   "maxInputChars": 4000,
   "maxFileSizeMb": 5,
   "maxRows": 200,
   "maxColumns": 20,
   "reportFormat": "xlsx",
   "chartType": "bar",
+  "mcpWindowDays": 7,
+  "mcpTopN": 5,
   "allowedFileTypes": [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
     "text/csv"
   ],
-  "systemPrompt": "You are an internal operations assistant. Provide concise answers. When data is available, summarize insights and reference tables, charts, and report availability."
+  "systemPrompt": "你是内部运维助手。回答要简洁清晰。当有数据时，请总结洞察，并提示表格、图表和报告是否可用。"
 }
